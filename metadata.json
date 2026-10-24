@@ -1,0 +1,8 @@
+{
+  "name": "Impostor Protocol",
+  "description": "Real-time multiplayer 3D social deduction game inspired by Among Us, featuring custom lobbies, procedural bean crewmates, and full game settings.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
