@@ -108,25 +108,28 @@ export const MainMenu: React.FC<MenuProps> = ({ onLobbyJoined, initialJoinCode }
       </div>
 
       {/* Center Hero Logo & Action Panel */}
-      <div className="w-full max-w-md flex flex-col items-center z-10 my-auto py-8 sm:py-12 space-y-6">
+      <div className="w-full max-w-xl flex flex-col items-center z-10 my-auto py-8 sm:py-12 space-y-6">
         {/* Main Logo */}
         <div className="text-center space-y-2">
-          <h1 className="text-4xl sm:text-5xl md:text-6xl font-black tracking-tight text-transparent bg-clip-text bg-gradient-to-b from-cyan-300 via-sky-400 to-blue-600 drop-shadow-[0_8px_16px_rgba(2,132,199,0.5)]">
-            IMPOSTOR
+          <div className="mx-auto mb-4 w-16 h-20 relative" aria-hidden="true">
+            <div className="absolute inset-x-2 top-0 bottom-2 rounded-[45%_45%_30%_30%] bg-[#ec4747] border-[3px] border-[#101520] shadow-[5px_5px_0_#030712]" />
+            <div className="absolute left-5 top-4 w-10 h-6 rounded-full bg-gradient-to-br from-white via-[#b9f0ff] to-[#56a9d3] border-[3px] border-[#101520] -rotate-6" />
+            <div className="absolute left-1 bottom-0 w-6 h-5 bg-[#ec4747] border-[3px] border-[#101520] rounded-b-lg" />
+            <div className="absolute right-1 bottom-0 w-6 h-5 bg-[#ec4747] border-[3px] border-[#101520] rounded-b-lg" />
+          </div>
+          <h1 className="text-5xl sm:text-7xl font-black tracking-tight leading-none text-white drop-shadow-[5px_6px_0_#0f182c]" style={{ WebkitTextStroke: '2px #111827' }}>
+            UPON <span className="text-[#ffde59]">US</span>
           </h1>
-          <h2 className="text-2xl md:text-3xl font-extrabold tracking-widest text-slate-300 drop-shadow-[0_4px_8px_rgba(0,0,0,0.8)]">
-            PROTOCOL
-          </h2>
-          <p className="text-xs uppercase tracking-widest text-cyan-400 font-semibold pt-1">
+          <p className="text-xs uppercase tracking-[0.22em] text-cyan-200 font-black pt-2">
             TRUST YOUR CREW. QUESTION EVERYONE.
           </p>
         </div>
 
         {/* Player Name Input Card */}
-        <div className="w-full bg-slate-900/90 backdrop-blur-xl p-5 sm:p-6 rounded-3xl border border-cyan-400/25 shadow-[0_25px_70px_rgba(0,0,0,0.55)] space-y-4">
+        <div className="w-full bg-[#080d18]/95 backdrop-blur-xl p-5 sm:p-6 rounded-[2rem] border-[3px] border-white shadow-[8px_8px_0_#030712] space-y-4">
           <div>
             <label htmlFor="crewmate-name" className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5">
-              Crewmate Name (Max 10)
+              YOUR CREWMATE NAME
             </label>
             <input
               id="crewmate-name"
@@ -136,7 +139,7 @@ export const MainMenu: React.FC<MenuProps> = ({ onLobbyJoined, initialJoinCode }
               value={playerName}
               onChange={(e) => handleNameChange(e.target.value)}
               placeholder="Enter your name..."
-              className="w-full px-4 py-3 bg-slate-950/80 border-2 border-slate-700 rounded-xl text-lg font-bold text-center tracking-wider text-cyan-300 focus-visible:outline-none focus-visible:border-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400/40 transition-all placeholder-slate-600"
+              className="w-full px-4 py-3 bg-[#1e293b] border-[3px] border-white/75 rounded-2xl text-lg font-black text-center tracking-wider text-cyan-100 focus-visible:outline-none focus-visible:border-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400/40 transition-all placeholder-slate-600"
             />
           </div>
 
@@ -146,34 +149,43 @@ export const MainMenu: React.FC<MenuProps> = ({ onLobbyJoined, initialJoinCode }
             </div>
           )}
 
-          {/* Action Buttons */}
-          <div className="grid grid-cols-1 gap-3 pt-2">
+          {/* Big, clearly separated Play / Join cards inspired by social-deduction lobby menus. */}
+          <div className="grid grid-cols-2 gap-3 pt-2">
             <button
               onClick={handleCreateLobby}
-              className="w-full py-3.5 px-6 rounded-xl font-black text-lg tracking-wider text-slate-950 bg-gradient-to-r from-emerald-400 to-teal-400 hover:from-emerald-300 hover:to-teal-300 shadow-[0_6px_20px_rgba(16,185,129,0.35)] active:translate-y-0.5 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-emerald-300/60 transition-all flex items-center justify-center space-x-2 cursor-pointer border border-emerald-300/60"
+              className="group min-h-36 p-4 rounded-2xl font-black text-lg tracking-wide text-[#172212] bg-[#88da47] hover:bg-[#a4f36c] border-[3px] border-white shadow-[4px_5px_0_#030712] active:translate-y-0.5 focus-visible:ring-4 focus-visible:ring-yellow-300 transition-all flex flex-col items-center justify-center gap-3 cursor-pointer"
             >
-              <Play className="w-5 h-5 fill-current" />
-              <span>CREATE LOBBY</span>
+              <div className="w-14 h-14 rounded-2xl bg-black/15 flex items-center justify-center group-hover:scale-110 transition-transform">
+                <Play className="w-8 h-8 fill-current" />
+              </div>
+              <span>HOST GAME</span>
             </button>
-
             <button
               onClick={() => {
                 soundEngine.playClick();
                 setErrorMessage('');
                 setShowJoinModal(true);
               }}
-              className="w-full py-3.5 px-6 rounded-xl font-black text-lg tracking-wider text-white bg-slate-800 hover:bg-slate-700 border-2 border-cyan-500/50 hover:border-cyan-400 shadow-[0_6px_20px_rgba(6,182,212,0.2)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-cyan-300/60 active:translate-y-0.5 transition-all flex items-center justify-center space-x-2 cursor-pointer"
+              className="group min-h-36 p-4 rounded-2xl font-black text-lg tracking-wide text-white bg-[#247bdb] hover:bg-[#3997fb] border-[3px] border-white shadow-[4px_5px_0_#030712] active:translate-y-0.5 focus-visible:ring-4 focus-visible:ring-yellow-300 transition-all flex flex-col items-center justify-center gap-3 cursor-pointer"
             >
-              <LogIn className="w-5 h-5" />
-              <span>JOIN LOBBY</span>
+              <div className="w-14 h-14 rounded-2xl bg-black/15 flex items-center justify-center group-hover:scale-110 transition-transform">
+                <LogIn className="w-8 h-8" />
+              </div>
+              <span>JOIN BY CODE</span>
             </button>
           </div>
+          <button
+            onClick={() => { soundEngine.playClick(); setShowHowToPlay(true); }}
+            className="w-full py-2.5 rounded-xl border-2 border-white/60 hover:bg-white/15 text-white font-black tracking-widest text-xs flex items-center justify-center gap-2 transition-all focus-visible:ring-4 focus-visible:ring-yellow-300"
+          >
+            <HelpCircle className="w-4 h-4" /> HOW TO PLAY
+          </button>
         </div>
       </div>
 
       {/* Footer Info */}
       <div className="z-10 text-center text-xs text-slate-400 font-medium pb-2">
-        <span>Use WASD or Touch Joystick to move your crewmate in the 3D dropship.</span>
+        <span>WASD to walk · Drag to look around · Find your crew aboard the dropship.</span>
       </div>
 
       {/* JOIN LOBBY MODAL */}
