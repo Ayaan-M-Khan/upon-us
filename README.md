@@ -68,8 +68,9 @@ Impostors have access to a tactical sabotage map with a 30-second shared cooldow
 | **Kill (Impostor)** | `Q` | "KILL" Action Button |
 | **Vent (Impostor)** | `F` | "VENT" Action Button |
 | **Sabotage (Impostor)** | `G` | "SABOTAGE" Action Button |
-| **Camera View** | `V` (Toggle 1st / 3rd Person) | HUD Camera Mode Toggle |
+| **Camera View** | `C` (Toggle 1st / 3rd Person) | HUD Camera Mode Toggle |
 | **Ship Map** | `Tab` or `M` | HUD Map Button |
+| **Push-to-talk** | Hold `V` | Voice HUD |
 | **Cancel / Exit** | `Esc` | Modal Close Buttons |
 
 ---
