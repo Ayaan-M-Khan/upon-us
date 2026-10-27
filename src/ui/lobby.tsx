@@ -241,8 +241,8 @@ export const LobbyView: React.FC<LobbyProps> = ({ onLeave }) => {
       )}
 
       {/* COLLAPSIBLE / TABBED BOTTOM CONTROL DOCK (Three.js skill directive: zero viewport occlusion!) */}
-      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 w-full max-w-3xl px-3 pointer-events-none">
-        <div className="bg-slate-900/92 backdrop-blur-xl border-2 border-slate-700/90 rounded-3xl shadow-[0_15px_35px_rgba(0,0,0,0.6)] overflow-hidden pointer-events-auto">
+      <div className="absolute z-20 pointer-events-none inset-x-0 bottom-0 px-2 pb-2 md:inset-x-auto md:right-4 md:top-20 md:bottom-4 md:w-[27rem] md:px-0 md:pb-0 flex flex-col justify-end md:justify-start">
+        <div className="bg-slate-900/92 backdrop-blur-xl border-2 border-slate-700/90 rounded-3xl shadow-[0_15px_35px_rgba(0,0,0,0.6)] overflow-hidden pointer-events-auto flex flex-col md:h-full md:min-h-0">
           {/* Navigation Tabs Header */}
           <div className="flex border-b border-slate-800 bg-slate-950/60 p-1.5 space-x-1">
             <button
@@ -257,7 +257,7 @@ export const LobbyView: React.FC<LobbyProps> = ({ onLeave }) => {
               }`}
             >
               <Palette className="w-4 h-4" />
-              <span>CUSTOMIZE SUIT</span>
+              <span>SUIT</span>
             </button>
 
             <button
@@ -272,7 +272,7 @@ export const LobbyView: React.FC<LobbyProps> = ({ onLeave }) => {
               }`}
             >
               <Users className="w-4 h-4" />
-              <span>CREW LIST ({lobby?.players.length || 1})</span>
+              <span>CREW ({lobby?.players.length || 1})</span>
             </button>
 
             <button
@@ -287,19 +287,19 @@ export const LobbyView: React.FC<LobbyProps> = ({ onLeave }) => {
               }`}
             >
               <Sliders className="w-4 h-4" />
-              <span>GAME RULES {isHost ? '(HOST)' : ''}</span>
+              <span>RULES</span>
             </button>
           </div>
 
           {/* TAB 1: CUSTOMIZE SUIT */}
           {activeTab === 'customize' && (
-            <div className="p-4 space-y-3 max-h-[38vh] overflow-y-auto">
+            <div className="p-4 space-y-3 max-h-[34vh] md:max-h-none md:flex-1 md:min-h-0 overflow-y-auto">
               {/* Color Swatches Grid */}
               <div>
                 <span className="block text-xs font-black uppercase tracking-wider text-slate-400 mb-2">
                   12 CREWMATE COLORS (NO DUPLICATES)
                 </span>
-                <div className="grid grid-cols-6 sm:grid-cols-12 gap-2">
+                <div className="grid grid-cols-6 gap-2.5">
                   {PLAYER_COLORS.map((c) => {
                     const takenBy = lobby?.players.find((p) => p.colorId === c.id);
                     const isTakenByOther = takenBy && takenBy.id !== socketId;
@@ -333,7 +333,7 @@ export const LobbyView: React.FC<LobbyProps> = ({ onLeave }) => {
                 <span className="block text-xs font-black uppercase tracking-wider text-slate-400 mb-2">
                   COSMETIC HATS
                 </span>
-                <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+                <div className="grid grid-cols-3 gap-2">
                   {PLAYER_HATS.map((h) => {
                     const isSelected = localPlayer?.hatId === h.id;
                     return (
@@ -357,8 +357,8 @@ export const LobbyView: React.FC<LobbyProps> = ({ onLeave }) => {
 
           {/* TAB 2: PLAYERS ROSTER */}
           {activeTab === 'players' && (
-            <div className="p-4 space-y-2 max-h-[38vh] overflow-y-auto">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div className="p-4 space-y-2 max-h-[34vh] md:max-h-none md:flex-1 md:min-h-0 overflow-y-auto">
+              <div className="grid grid-cols-1 gap-2">
                 {lobby?.players.map((p) => {
                   const color = PLAYER_COLORS.find((c) => c.id === p.colorId) || PLAYER_COLORS[0];
                   const hat = PLAYER_HATS.find((h) => h.id === p.hatId);
@@ -411,7 +411,7 @@ export const LobbyView: React.FC<LobbyProps> = ({ onLeave }) => {
 
           {/* TAB 3: GAME SETTINGS */}
           {activeTab === 'settings' && (
-            <div className="p-4 space-y-4 max-h-[38vh] overflow-y-auto text-xs">
+            <div className="p-4 space-y-4 max-h-[34vh] md:max-h-none md:flex-1 md:min-h-0 overflow-y-auto text-xs">
               {!isHost && (
                 <div className="p-2.5 bg-cyan-950/60 border border-cyan-700/60 rounded-xl text-cyan-300 font-semibold flex items-center space-x-2">
                   <Info className="w-4 h-4 shrink-0" />
@@ -419,7 +419,7 @@ export const LobbyView: React.FC<LobbyProps> = ({ onLeave }) => {
                 </div>
               )}
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-3">
                 {/* Impostor Count */}
                 <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800 space-y-1.5">
                   <div className="flex justify-between font-bold text-slate-300">
@@ -672,52 +672,33 @@ export const LobbyView: React.FC<LobbyProps> = ({ onLeave }) => {
           )}
 
           {/* Bottom Action Footer (Start Game buttons) */}
-          <div className="p-3 bg-slate-950/90 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3">
-            <div className="text-xs text-slate-400 font-semibold text-center sm:text-left">
-              <span>Walk around with </span>
-              <kbd className="px-1.5 py-0.5 bg-slate-800 border border-slate-700 rounded text-cyan-300 font-mono">
-                WASD
-              </kbd>
-              <span> • Drag mouse to rotate camera</span>
-            </div>
-
+          <div className="p-3 bg-slate-950/90 border-t border-slate-800 flex flex-col gap-2">
             {isHost ? (
-              <div className="flex items-center space-x-2 w-full sm:w-auto">
-                {/* Rapid Debug / Solo testing button */}
-                <button
-                  onClick={handleStartTestGame}
-                  className="flex-1 sm:flex-none py-2.5 px-4 rounded-xl font-bold text-xs tracking-wider bg-slate-800 hover:bg-slate-700 border border-amber-500/50 text-amber-300 transition-all cursor-pointer flex items-center justify-center space-x-1.5 shadow-md"
-                  title="Test game transition solo without waiting for 4 players"
-                >
-                  <Sparkles className="w-3.5 h-3.5" />
-                  <span>START SOLO/TEST</span>
-                </button>
-
-                {/* Standard Start Button */}
+              <>
                 <button
                   disabled={!canStartNormal}
                   onClick={handleStartGame}
-                  className={`flex-1 sm:flex-none py-2.5 px-6 rounded-xl font-black text-sm tracking-wider flex items-center justify-center space-x-2 transition-all cursor-pointer shadow-xl ${
+                  className={`w-full py-3 rounded-2xl font-black text-base tracking-wider flex items-center justify-center space-x-2 transition-all cursor-pointer shadow-xl ${
                     canStartNormal
                       ? 'bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 shadow-emerald-500/30'
                       : 'bg-slate-800 text-slate-500 border border-slate-700/60 cursor-not-allowed opacity-60'
                   }`}
                 >
-                  <Play className="w-4 h-4 fill-current" />
-                  <span>
-                    {!canStartNormal
-                      ? `NEEDS ${MIN_PLAYERS_TO_START}+ PLAYERS`
-                      : botsToAdd > 0
-                        ? `START GAME (+${botsToAdd} BOT${botsToAdd > 1 ? 'S' : ''})`
-                        : 'START GAME'}
-                  </span>
+                  <Play className="w-5 h-5 fill-current" />
+                  <span>{canStartNormal ? 'START GAME' : `NEEDS ${MIN_PLAYERS_TO_START}+ PLAYERS`}</span>
                 </button>
-              </div>
+                <div className="text-center text-[11px] font-semibold text-slate-400">
+                  {botsToAdd > 0
+                    ? `${humanCount} player${humanCount > 1 ? 's' : ''} + ${botsToAdd} bot${botsToAdd > 1 ? 's' : ''} will fill the empty seats`
+                    : `${humanCount} players ready`}
+                </div>
+              </>
             ) : (
-              <div className="text-xs font-bold text-yellow-400 tracking-wider">
-                WAITING FOR HOST TO START GAME...
-              </div>
+              <div className="py-2 text-center text-xs font-bold text-yellow-400 tracking-wider">WAITING FOR HOST TO START GAME...</div>
             )}
+            <div className="text-center text-[11px] text-slate-500">
+              Walk around with <kbd className="px-1 bg-slate-800 border border-slate-700 rounded text-cyan-300 font-mono">WASD</kbd> • drag to rotate camera
+            </div>
           </div>
         </div>
       </div>

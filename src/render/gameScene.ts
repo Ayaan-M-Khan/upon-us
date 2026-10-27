@@ -31,6 +31,8 @@ export interface InteractionContext {
   taskId: string | null;
   taskName: string | null;
   taskHold: number;
+  taskStep: number;
+  taskTotalSteps: number;
   killTargetId: string | null;
   reportBodyId: string | null;
   ventId: string | null;
@@ -41,6 +43,8 @@ const EMPTY_CONTEXT: InteractionContext = {
   taskId: null,
   taskName: null,
   taskHold: 0,
+  taskStep: 0,
+  taskTotalSteps: 1,
   killTargetId: null,
   reportBodyId: null,
   ventId: null,
@@ -331,6 +335,8 @@ export class GameScene {
         ctx.taskId = t.taskId;
         ctx.taskName = t.name;
         ctx.taskHold = t.hold;
+        ctx.taskStep = t.step;
+        ctx.taskTotalSteps = t.totalSteps;
       }
     }
 
@@ -438,16 +444,27 @@ export class GameScene {
 
     this.isMoving = Math.hypot(this.velocity.x, this.velocity.y) > 0.3;
     if (this.isMoving) {
-      let tx = this.localPos.x + this.velocity.x * delta;
-      let tz = this.localPos.z + this.velocity.y * delta;
-      if (meAlive) {
-        const r = resolveWallCollisions(tx, tz);
-        tx = r.x;
-        tz = r.z;
+      // Sub-step the collision so a slow frame can never carry the player through a wall.
+      const stepX = this.velocity.x * delta;
+      const stepZ = this.velocity.y * delta;
+      const steps = Math.max(1, Math.ceil(Math.hypot(stepX, stepZ) / 0.25));
+      for (let i = 0; i < steps; i++) {
+        let tx = this.localPos.x + stepX / steps;
+        let tz = this.localPos.z + stepZ / steps;
+        if (meAlive) {
+          const r = resolveWallCollisions(tx, tz);
+          tx = r.x;
+          tz = r.z;
+        }
+        this.localPos.x = tx;
+        this.localPos.z = tz;
       }
-      this.localPos.x = tx;
-      this.localPos.z = tz;
-      this.localRotation = Math.atan2(this.velocity.x, this.velocity.y);
+
+      // Turn smoothly toward where we are heading (shortest arc).
+      const targetRot = Math.atan2(this.velocity.x, this.velocity.y);
+      let dr = targetRot - this.localRotation;
+      dr = Math.atan2(Math.sin(dr), Math.cos(dr));
+      this.localRotation += dr * Math.min(1, delta * 16);
 
       const room = detectRoom(this.localPos.x, this.localPos.z);
       if (room !== this.currentRoom) {

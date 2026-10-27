@@ -61,29 +61,25 @@ export class Map3D {
     const floorGroup = new THREE.Group();
 
     for (const room of MAP_ROOMS_DETAIL) {
-      const width = room.bounds.maxX - room.bounds.minX;
-      const depth = room.bounds.maxZ - room.bounds.minZ;
-      const centerX = (room.bounds.minX + room.bounds.maxX) / 2;
-      const centerZ = (room.bounds.minZ + room.bounds.maxZ) / 2;
+      const floorTexBase = this.createFloorTexture(room.floorHex);
+      room.rects.forEach((r, idx) => {
+        const width = r.maxX - r.minX;
+        const depth = r.maxZ - r.minZ;
+        const floorTex = floorTexBase.clone();
+        floorTex.needsUpdate = true;
+        floorTex.repeat.set(Math.max(1, Math.round(width / 3)), Math.max(1, Math.round(depth / 3)));
 
-      const floorGeo = new THREE.BoxGeometry(width, 0.3, depth);
-      const floorTex = this.createFloorTexture(room.floorHex);
-      floorTex.repeat.set(Math.max(1, Math.round(width / 3)), Math.max(1, Math.round(depth / 3)));
-
-      const floorMat = new THREE.MeshStandardMaterial({
-        map: floorTex,
-        roughness: 0.5,
-        metalness: 0.3,
+        const floorMat = new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.5, metalness: 0.3 });
+        // The second rectangle of a chamfered room sits a hair lower so the two never z-fight.
+        const floorMesh = new THREE.Mesh(new THREE.BoxGeometry(width, 0.3, depth), floorMat);
+        floorMesh.position.set((r.minX + r.maxX) / 2, -0.15 - idx * 0.002, (r.minZ + r.maxZ) / 2);
+        floorMesh.receiveShadow = true;
+        floorGroup.add(floorMesh);
       });
-
-      const floorMesh = new THREE.Mesh(floorGeo, floorMat);
-      floorMesh.position.set(centerX, -0.15, centerZ);
-      floorMesh.receiveShadow = true;
-      floorGroup.add(floorMesh);
 
       // Glowing room center point light
       const roomLight = new THREE.PointLight(new THREE.Color(room.color), 0.7, 18);
-      roomLight.position.set(centerX, 2.5, centerZ);
+      roomLight.position.set(room.labelPos.x, 2.5, room.labelPos.z);
       this.roomLights.push(roomLight);
       floorGroup.add(roomLight);
     }
@@ -189,7 +185,7 @@ export class Map3D {
 
     // Extra cafeteria tables like the original's bench tables
     const benchMat = new THREE.MeshStandardMaterial({ color: 0x475569, metalness: 0.4, roughness: 0.4 });
-    for (const [bx, bz] of [[-8, -26], [8, -26], [-8, -18], [8, -18]]) {
+    for (const [bx, bz] of [[-5.5, -22.5], [5.5, -22.5], [-5.5, -13.5], [5.5, -13.5]]) {
       const bench = new THREE.Mesh(new THREE.CylinderGeometry(1.3, 1.4, 0.8, 16), benchMat);
       bench.position.set(bx, 0.4, bz);
       bench.castShadow = true;

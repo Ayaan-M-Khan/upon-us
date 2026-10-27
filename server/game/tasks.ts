@@ -1,7 +1,8 @@
 /**
  * Impostor Protocol - Task definitions
  * Each step happens at a fixed station (room + spot index, see getRoomSpot in shared/mapData).
- * Players hold USE at the station for `hold` seconds; the server validates distance and time.
+ * Players press USE at the station and play a 2D mini-game on the client. `hold` is the minimum
+ * plausible duration in seconds (bots spend this long "working"); the server validates distance and time.
  */
 
 export type TaskKind = 'common' | 'short' | 'long';

@@ -204,11 +204,8 @@ export class DropshipLobbyScene {
     northWall.receiveShadow = true;
     dropshipGroup.add(northWall);
 
-    // South wall (Z = +4)
-    const southWall = new THREE.Mesh(northWallGeo, wallMat);
-    southWall.position.set(0, 2.05, 4.1);
-    southWall.receiveShadow = true;
-    dropshipGroup.add(southWall);
+    // The south wall used to stand between the camera and the crew (the camera orbits on that side),
+    // which hid the player behind a grey slab. The dropship is now open on that side, like a stage.
 
     // West back wall (X = -8)
     const backWallGeo = new THREE.BoxGeometry(0.4, 4.5, 8);
@@ -315,50 +312,61 @@ export class DropshipLobbyScene {
     }
   }
 
-  private bindInputs(): void {
-    window.addEventListener('keydown', (e) => {
-      this.keys[e.code] = true;
-    });
-
-    window.addEventListener('keyup', (e) => {
-      this.keys[e.code] = false;
-    });
-
-    const dom = this.renderer.domElement;
-
-    // Mouse drag for camera orbit
-    dom.addEventListener('pointerdown', (e) => {
-      this.isPointerDown = true;
-      this.lastPointerX = e.clientX;
-      this.lastPointerY = e.clientY;
-    });
-
-    window.addEventListener('pointermove', (e) => {
-      if (!this.isPointerDown) return;
-      const dx = e.clientX - this.lastPointerX;
-      const dy = e.clientY - this.lastPointerY;
-      this.lastPointerX = e.clientX;
-      this.lastPointerY = e.clientY;
-
-      this.cameraAngleH -= dx * 0.006;
-      this.cameraAngleV = Math.max(0.1, Math.min(1.2, this.cameraAngleV + dy * 0.005));
-    });
-
-    window.addEventListener('pointerup', () => {
+  // Named handlers so they can be removed on dispose, and held keys are cleared whenever focus is lost
+  // (the same "stuck walking" bug the match scene had).
+  private isTyping(e: Event): boolean {
+    const el = e.target as HTMLElement | null;
+    return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA');
+  }
+  private onKeyDown = (e: KeyboardEvent): void => {
+    if (this.isTyping(e)) return;
+    this.keys[e.code] = true;
+  };
+  private onKeyUp = (e: KeyboardEvent): void => {
+    this.keys[e.code] = false;
+  };
+  private clearKeys = (): void => {
+    this.keys = {};
+    this.joystickVector = { x: 0, y: 0 };
+    this.isPointerDown = false;
+  };
+  private onPointerDown = (e: PointerEvent): void => {
+    this.isPointerDown = true;
+    this.lastPointerX = e.clientX;
+    this.lastPointerY = e.clientY;
+  };
+  private onPointerMove = (e: PointerEvent): void => {
+    if (!this.isPointerDown) return;
+    if (e.buttons === 0) {
       this.isPointerDown = false;
-    });
+      return;
+    }
+    const dx = e.clientX - this.lastPointerX;
+    const dy = e.clientY - this.lastPointerY;
+    this.lastPointerX = e.clientX;
+    this.lastPointerY = e.clientY;
+    this.cameraAngleH -= dx * 0.006;
+    this.cameraAngleV = Math.max(0.1, Math.min(1.2, this.cameraAngleV + dy * 0.005));
+  };
+  private onPointerUp = (): void => {
+    this.isPointerDown = false;
+  };
+  private onWheel = (e: WheelEvent): void => {
+    this.cameraDistance = Math.max(3.5, Math.min(10, this.cameraDistance + e.deltaY * 0.005));
+  };
 
-    // Zoom
-    dom.addEventListener(
-      'wheel',
-      (e) => {
-        this.cameraDistance = Math.max(3.5, Math.min(10, this.cameraDistance + e.deltaY * 0.005));
-      },
-      { passive: true }
-    );
-
-    // Resize
-    window.addEventListener('resize', this.onResize.bind(this));
+  private bindInputs(): void {
+    window.addEventListener('keydown', this.onKeyDown);
+    window.addEventListener('keyup', this.onKeyUp);
+    window.addEventListener('blur', this.clearKeys);
+    document.addEventListener('visibilitychange', this.clearKeys);
+    this.renderer.domElement.addEventListener('pointerdown', this.onPointerDown);
+    window.addEventListener('pointermove', this.onPointerMove);
+    window.addEventListener('pointerup', this.onPointerUp);
+    window.addEventListener('pointercancel', this.onPointerUp);
+    this.renderer.domElement.addEventListener('wheel', this.onWheel, { passive: true });
+    window.addEventListener('resize', this.onResize);
+    this.onResize();
   }
 
   public setJoystick(x: number, y: number): void {
@@ -455,8 +463,10 @@ export class DropshipLobbyScene {
       this.localPos.x = Math.max(-7.2, Math.min(7.2, this.localPos.x));
       this.localPos.z = Math.max(-3.0, Math.min(3.0, this.localPos.z));
 
-      // Face direction of movement
-      this.localRotation = Math.atan2(worldMoveX, worldMoveZ);
+      // Turn smoothly toward the direction of movement (shortest arc)
+      let dr = Math.atan2(worldMoveX, worldMoveZ) - this.localRotation;
+      dr = Math.atan2(Math.sin(dr), Math.cos(dr));
+      this.localRotation += dr * Math.min(1, delta * 16);
 
       // Send input to server at ~20 Hz
       if (now - this.lastInputSendTime > 50) {
@@ -530,20 +540,32 @@ export class DropshipLobbyScene {
     this.animationFrameId = requestAnimationFrame(this.tick);
   }
 
-  private onResize(): void {
+  private onResize = (): void => {
     if (!this.container || this.isDestroyed) return;
     const width = this.container.clientWidth;
     const height = Math.max(this.container.clientHeight, 1);
     this.camera.aspect = width / height;
+    // On desktop the crew panel covers the right ~27rem: shift the picture so the crew stays
+    // centred in the free area instead of hiding behind the panel.
+    const panel = width >= 768 ? 432 : 0;
+    if (panel > 0) this.camera.setViewOffset(width, height, panel / 2, 0, width, height);
+    else this.camera.clearViewOffset();
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(width, height);
-  }
+  };
 
   public dispose(): void {
     this.isDestroyed = true;
     cancelAnimationFrame(this.animationFrameId);
 
     window.removeEventListener('resize', this.onResize);
+    window.removeEventListener('keydown', this.onKeyDown);
+    window.removeEventListener('keyup', this.onKeyUp);
+    window.removeEventListener('blur', this.clearKeys);
+    document.removeEventListener('visibilitychange', this.clearKeys);
+    window.removeEventListener('pointermove', this.onPointerMove);
+    window.removeEventListener('pointerup', this.onPointerUp);
+    window.removeEventListener('pointercancel', this.onPointerUp);
 
     for (const model of this.playerModels.values()) {
       model.dispose();

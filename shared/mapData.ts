@@ -35,7 +35,12 @@ export interface MapRoom {
   color: string;
   floorHex: string;
   labelPos: { x: number; z: number };
+  /** Bounding box of the room (for labels, lights, quick checks). */
   bounds: Rect;
+  /** The actual floor: rooms can be L-shaped / chamfered unions of rectangles. */
+  rects: Rect[];
+  /** Four task-station spots inside the room. */
+  spots: { x: number; z: number }[];
 }
 
 export interface VentDefinition {
@@ -54,52 +59,102 @@ export interface Corridor {
 
 const rect = (minX: number, maxX: number, minZ: number, maxZ: number): Rect => ({ minX, maxX, minZ, maxZ });
 
-const room = (id: string, name: string, color: string, floorHex: string, bounds: Rect): MapRoom => ({
-  id,
-  name,
-  color,
-  floorHex,
-  bounds,
-  labelPos: { x: (bounds.minX + bounds.maxX) / 2, z: (bounds.minZ + bounds.maxZ) / 2 },
-});
+const room = (
+  id: string,
+  name: string,
+  color: string,
+  floorHex: string,
+  rects: Rect[],
+  spots: [number, number][]
+): MapRoom => {
+  const bounds: Rect = {
+    minX: Math.min(...rects.map((r) => r.minX)),
+    maxX: Math.max(...rects.map((r) => r.maxX)),
+    minZ: Math.min(...rects.map((r) => r.minZ)),
+    maxZ: Math.max(...rects.map((r) => r.maxZ)),
+  };
+  return {
+    id,
+    name,
+    color,
+    floorHex,
+    bounds,
+    rects,
+    spots: spots.map(([x, z]) => ({ x, z })),
+    labelPos: { x: (bounds.minX + bounds.maxX) / 2, z: (bounds.minZ + bounds.maxZ) / 2 },
+  };
+};
 
+// Layout (north is up). Chamfered rooms are unions of two overlapping rectangles.
+//
+//   Upper Engine   Medbay        CAFETERIA          Weapons
+//   Reactor        Security       Admin     O2         Navigation
+//   Lower Engine   Electrical    Storage     Comms   Shields
 export const MAP_ROOMS_DETAIL: MapRoom[] = [
-  room('cafeteria', 'Cafeteria', '#38bdf8', '#1e293b', rect(-12, 12, -30, -14)),
-  room('upper_engine', 'Upper Engine', '#a855f7', '#2e1065', rect(-48, -30, -32, -18)),
-  room('medbay', 'Medbay', '#06b6d4', '#134e4a', rect(-24, -14, -20, -8)),
-  room('reactor', 'Reactor', '#ef4444', '#450a0a', rect(-56, -42, -12, 6)),
-  room('security', 'Security', '#6366f1', '#1e1b4b', rect(-30, -24, -6, 2)),
-  room('lower_engine', 'Lower Engine', '#a855f7', '#2e1065', rect(-48, -30, 10, 24)),
-  room('electrical', 'Electrical', '#eab308', '#422006', rect(-26, -14, 10, 22)),
-  room('storage', 'Storage', '#f97316', '#431407', rect(-10, 8, 14, 32)),
-  room('admin', 'Admin', '#10b981', '#064e3b', rect(8, 22, -6, 6)),
-  room('communications', 'Communications', '#14b8a6', '#042f2e', rect(14, 26, 24, 34)),
-  room('shields', 'Shields', '#3b82f6', '#172554', rect(30, 44, 12, 28)),
-  room('navigation', 'Navigation', '#ec4899', '#500724', rect(46, 58, -14, 4)),
-  room('o2', 'O2', '#22c55e', '#14532d', rect(20, 30, -20, -10)),
-  room('weapons', 'Weapons', '#fb923c', '#3b0764', rect(30, 44, -32, -20)),
+  room('cafeteria', 'Cafeteria', '#38bdf8', '#1e293b',
+    [rect(-12, 12, -21, -15), rect(-9, 9, -25, -11)],
+    [[-7, -23], [7, -23], [-7, -13], [7, -13]]),
+  room('upper_engine', 'Upper Engine', '#a855f7', '#2e1065',
+    [rect(-44, -30, -24, -16), rect(-42, -32, -26, -14)],
+    [[-41, -23], [-33, -23], [-42, -18], [-33, -18]]),
+  room('medbay', 'Medbay', '#06b6d4', '#134e4a',
+    [rect(-27, -17, -13, -7)],
+    [[-25.5, -11], [-18.5, -11], [-25.5, -8.5], [-22.5, -8.5]]),
+  room('reactor', 'Reactor', '#ef4444', '#450a0a',
+    [rect(-46, -34, -8, 8), rect(-44, -36, -10, 10)],
+    [[-43, -6], [-37, -6], [-43, 6], [-37, 6]]),
+  room('security', 'Security', '#6366f1', '#1e1b4b',
+    [rect(-30, -23, -5, 3)],
+    [[-28, -3], [-25, -3], [-28, 1], [-25, 1]]),
+  room('lower_engine', 'Lower Engine', '#a855f7', '#2e1065',
+    [rect(-44, -30, 16, 24), rect(-42, -32, 14, 26)],
+    [[-41, 18], [-33, 18], [-41, 23], [-35, 23]]),
+  room('electrical', 'Electrical', '#eab308', '#422006',
+    [rect(-26, -12, 12, 22)],
+    [[-24, 14], [-14, 14], [-22, 20], [-16, 20]]),
+  room('storage', 'Storage', '#f97316', '#431407',
+    [rect(-8, 10, 14, 26)],
+    [[-6, 16], [8, 16], [-5, 24], [5, 24]]),
+  room('admin', 'Admin', '#10b981', '#064e3b',
+    [rect(8, 18, -4, 6)],
+    [[10, -2], [16, -2], [10, 4], [16, 4]]),
+  room('communications', 'Communications', '#14b8a6', '#042f2e',
+    [rect(16, 26, 20, 28)],
+    [[18, 22], [24, 22], [18, 26], [24, 26]]),
+  room('shields', 'Shields', '#3b82f6', '#172554',
+    [rect(30, 42, 12, 28)],
+    [[33, 14], [39, 14], [34, 26.5], [39, 25]]),
+  room('navigation', 'Navigation', '#ec4899', '#500724',
+    [rect(44, 52, -12, 4)],
+    [[47, -11], [50.5, -11], [46, -2], [50.5, -2]]),
+  room('o2', 'O2', '#22c55e', '#14532d',
+    [rect(20, 28, -12, -6)],
+    [[21.5, -10.5], [26.5, -10.5], [21.5, -7.5], [26.5, -7.5]]),
+  room('weapons', 'Weapons', '#fb923c', '#3b0764',
+    [rect(30, 42, -26, -14)],
+    [[33, -24], [40, -24], [40, -16], [36, -20]]),
 ];
 
 export const MAP_CORRIDORS: Corridor[] = [
-  { id: 'hall_upper_cafeteria', name: 'Upper West Hallway', bounds: rect(-30, -12, -27, -23) },
-  { id: 'hall_medbay', name: 'Medbay Hallway', bounds: rect(-20, -16, -23, -20) },
-  { id: 'hall_upper_reactor', name: 'Reactor Hallway (North)', bounds: rect(-47, -43, -18, -12) },
-  { id: 'hall_lower_reactor', name: 'Reactor Hallway (South)', bounds: rect(-47, -43, 6, 10) },
-  { id: 'hall_reactor_security', name: 'Security Hallway', bounds: rect(-42, -30, -4, 0) },
-  { id: 'hall_security_spine', name: 'Security Link', bounds: rect(-24, -20, -4, 0) },
-  { id: 'hall_west_spine', name: 'West Corridor', bounds: rect(-20, -16, -8, 10) },
-  { id: 'hall_lower_electrical', name: 'Engine Hallway', bounds: rect(-30, -26, 14, 18) },
-  { id: 'hall_electrical_storage', name: 'Electrical Hallway', bounds: rect(-14, -10, 16, 20) },
-  { id: 'hall_central', name: 'Main Corridor', bounds: rect(-2, 2, -14, 14) },
-  { id: 'hall_admin', name: 'Admin Hallway', bounds: rect(2, 8, -2, 2) },
-  { id: 'hall_east', name: 'East Hallway', bounds: rect(12, 30, -28, -24) },
-  { id: 'hall_o2', name: 'O2 Hallway', bounds: rect(22, 26, -24, -20) },
-  { id: 'hall_o2_nav', name: 'Navigation Hallway', bounds: rect(30, 46, -14, -10) },
-  { id: 'hall_weapons', name: 'Weapons Hallway', bounds: rect(32, 36, -20, -14) },
-  { id: 'hall_nav_south', name: 'East Corridor', bounds: rect(48, 52, 4, 18) },
-  { id: 'hall_shields_east', name: 'Shields Hallway', bounds: rect(42, 48, 14, 18) },
-  { id: 'hall_shields_comms', name: 'Comms Hallway', bounds: rect(26, 30, 24, 28) },
-  { id: 'hall_comms_storage', name: 'Storage Hallway', bounds: rect(8, 14, 26, 30) },
+  { id: 'hall_west', name: 'West Hallway', bounds: rect(-30, -12, -20, -16) },
+  { id: 'hall_medbay', name: 'Medbay Hallway', bounds: rect(-23, -19, -16, -13) },
+  { id: 'hall_upper_reactor', name: 'Reactor Hallway (North)', bounds: rect(-41, -37, -14, -10) },
+  { id: 'hall_lower_reactor', name: 'Reactor Hallway (South)', bounds: rect(-41, -37, 10, 14) },
+  { id: 'hall_reactor_security', name: 'Security Hallway', bounds: rect(-34, -30, -3, 1) },
+  { id: 'hall_security_spine', name: 'Security Link', bounds: rect(-23, -21, -3, 1) },
+  { id: 'hall_west_spine', name: 'West Corridor', bounds: rect(-21, -17, -7, 12) },
+  { id: 'hall_lower_electrical', name: 'Engine Hallway', bounds: rect(-30, -26, 17, 21) },
+  { id: 'hall_electrical_storage', name: 'Electrical Hallway', bounds: rect(-12, -8, 17, 21) },
+  { id: 'hall_central', name: 'Main Corridor', bounds: rect(-2, 2, -11, 14) },
+  { id: 'hall_admin', name: 'Admin Hallway', bounds: rect(2, 8, -1, 3) },
+  { id: 'hall_east', name: 'East Hallway', bounds: rect(12, 30, -20, -16) },
+  { id: 'hall_o2', name: 'O2 Hallway', bounds: rect(22, 26, -16, -12) },
+  { id: 'hall_o2_nav', name: 'Navigation Hallway', bounds: rect(28, 46, -10, -6) },
+  { id: 'hall_weapons', name: 'Weapons Hallway', bounds: rect(34, 38, -14, -10) },
+  { id: 'hall_nav_south', name: 'East Corridor', bounds: rect(46, 50, 4, 20) },
+  { id: 'hall_shields_east', name: 'Shields Hallway', bounds: rect(42, 46, 16, 20) },
+  { id: 'hall_shields_comms', name: 'Comms Hallway', bounds: rect(26, 30, 22, 26) },
+  { id: 'hall_comms_storage', name: 'Storage Hallway', bounds: rect(10, 16, 22, 26) },
 ];
 
 // ---------------------------------------------------------------------------
@@ -107,7 +162,7 @@ export const MAP_CORRIDORS: Corridor[] = [
 // ---------------------------------------------------------------------------
 
 export const GRID = { minX: -60, minZ: -36, cols: 124, rows: 76 } as const;
-export const MAP_BOUNDS = { minX: -58, maxX: 60, minZ: -34, maxZ: 36 };
+export const MAP_BOUNDS = { minX: -52, maxX: 56, minZ: -30, maxZ: 30 };
 
 const floorGrid = new Uint8Array(GRID.cols * GRID.rows);
 
@@ -118,7 +173,7 @@ function fillRect(r: Rect): void {
     }
   }
 }
-MAP_ROOMS_DETAIL.forEach((r) => fillRect(r.bounds));
+MAP_ROOMS_DETAIL.forEach((r) => r.rects.forEach(fillRect));
 MAP_CORRIDORS.forEach((c) => fillRect(c.bounds));
 
 const cellFloor = (i: number, j: number): boolean =>
@@ -193,9 +248,9 @@ export const cellToWorld = (i: number, j: number) => ({ x: GRID.minX + i + 0.5, 
 // Cafeteria / meeting
 // ---------------------------------------------------------------------------
 
-export const CAFETERIA_TABLE_CENTER = { x: 0, z: -22 };
+export const CAFETERIA_TABLE_CENTER = { x: 0, z: -18 };
 export const SPAWN_RADIUS = 4;
-export const EMERGENCY_BUTTON_POS = { x: 0, z: -22 };
+export const EMERGENCY_BUTTON_POS = { x: 0, z: -18 };
 export const EMERGENCY_BUTTON_RANGE = 3.2;
 
 export function getSpawnPosition(playerIndex: number, totalPlayers: number = 10): { x: number; z: number } {
@@ -212,29 +267,29 @@ export function getSpawnPosition(playerIndex: number, totalPlayers: number = 10)
 
 const ventGroups: { room: string; x: number; z: number; id: string }[][] = [
   [
-    { id: 'vent_reactor_n', room: 'Reactor', x: -54, z: -10 },
-    { id: 'vent_upper_engine', room: 'Upper Engine', x: -46, z: -30 },
+    { id: 'vent_reactor_n', room: 'Reactor', x: -43, z: -9 },
+    { id: 'vent_upper_engine', room: 'Upper Engine', x: -40, z: -24.5 },
   ],
   [
-    { id: 'vent_reactor_s', room: 'Reactor', x: -54, z: 4 },
-    { id: 'vent_lower_engine', room: 'Lower Engine', x: -46, z: 22 },
+    { id: 'vent_reactor_s', room: 'Reactor', x: -43, z: 8 },
+    { id: 'vent_lower_engine', room: 'Lower Engine', x: -40, z: 24.5 },
   ],
   [
-    { id: 'vent_medbay', room: 'Medbay', x: -22, z: -10 },
-    { id: 'vent_security', room: 'Security', x: -28, z: 0 },
-    { id: 'vent_electrical', room: 'Electrical', x: -24, z: 12 },
+    { id: 'vent_medbay', room: 'Medbay', x: -20, z: -9.5 },
+    { id: 'vent_security', room: 'Security', x: -26.5, z: -1 },
+    { id: 'vent_electrical', room: 'Electrical', x: -24, z: 18 },
   ],
   [
-    { id: 'vent_cafeteria', room: 'Cafeteria', x: 10, z: -28 },
-    { id: 'vent_admin', room: 'Admin', x: 20, z: -4 },
+    { id: 'vent_cafeteria', room: 'Cafeteria', x: 5, z: -24 },
+    { id: 'vent_admin', room: 'Admin', x: 13, z: 1 },
   ],
   [
-    { id: 'vent_weapons', room: 'Weapons', x: 42, z: -30 },
-    { id: 'vent_nav_n', room: 'Navigation', x: 56, z: -12 },
+    { id: 'vent_weapons', room: 'Weapons', x: 40, z: -20 },
+    { id: 'vent_nav_n', room: 'Navigation', x: 50.5, z: -8 },
   ],
   [
-    { id: 'vent_shields', room: 'Shields', x: 42, z: 26 },
-    { id: 'vent_nav_s', room: 'Navigation', x: 56, z: 2 },
+    { id: 'vent_shields', room: 'Shields', x: 40, z: 22 },
+    { id: 'vent_nav_s', room: 'Navigation', x: 50.5, z: 0 },
   ],
 ];
 
@@ -243,32 +298,24 @@ export const MAP_VENTS: VentDefinition[] = ventGroups.flatMap((group) =>
 );
 
 // ---------------------------------------------------------------------------
-// Task stations: four fixed spots in every room (inset from the corners).
+// Task stations: four fixed spots in every room (see `spots` in the room table).
 // Tasks refer to a (room, spot) pair.
 // ---------------------------------------------------------------------------
 
 export function getRoomSpot(roomName: string, spot: number): { x: number; z: number } {
   const r = MAP_ROOMS_DETAIL.find((m) => m.name === roomName) || MAP_ROOMS_DETAIL[0];
-  const b = r.bounds;
-  const inset = Math.min(2, (b.maxX - b.minX) / 3, (b.maxZ - b.minZ) / 3);
-  const spots = [
-    { x: b.minX + inset, z: b.minZ + inset },
-    { x: b.maxX - inset, z: b.minZ + inset },
-    { x: b.minX + inset, z: b.maxZ - inset },
-    { x: b.maxX - inset, z: b.maxZ - inset },
-  ];
-  return spots[((spot % 4) + 4) % 4];
+  return r.spots[((spot % 4) + 4) % 4];
 }
 
 export function getRoomCenter(roomName: string): { x: number; z: number } {
   const r = MAP_ROOMS_DETAIL.find((m) => m.name === roomName) || MAP_ROOMS_DETAIL[0];
-  return { x: (r.bounds.minX + r.bounds.maxX) / 2, z: (r.bounds.minZ + r.bounds.maxZ) / 2 };
+  return r.labelPos;
 }
 
 export function detectRoom(x: number, z: number): string {
   for (const r of MAP_ROOMS_DETAIL) {
-    if (x >= r.bounds.minX && x <= r.bounds.maxX && z >= r.bounds.minZ && z <= r.bounds.maxZ) {
-      return r.name;
+    for (const b of r.rects) {
+      if (x >= b.minX && x <= b.maxX && z >= b.minZ && z <= b.maxZ) return r.name;
     }
   }
   for (const c of MAP_CORRIDORS) {

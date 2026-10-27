@@ -12,6 +12,7 @@ import { CameraViewMode } from '../render/cameraController';
 import { GameScene, InteractionContext } from '../render/gameScene';
 import { GameHud } from './gameHud';
 import { GameOverOverlay, MeetingOverlay, RoleReveal } from './gameOverlays';
+import { TaskGame } from './taskGames';
 
 interface GameViewProps {
   settings: GameSettings;
@@ -22,6 +23,8 @@ const EMPTY_CTX: InteractionContext = {
   taskId: null,
   taskName: null,
   taskHold: 0,
+  taskStep: 0,
+  taskTotalSteps: 1,
   killTargetId: null,
   reportBodyId: null,
   ventId: null,
@@ -31,7 +34,9 @@ const EMPTY_CTX: InteractionContext = {
 export interface WorkState {
   taskId: string;
   name: string;
-  hold: number;
+  hold: number; // minimum seconds before the server will accept completion
+  step: number;
+  totalSteps: number;
   startedAt: number;
 }
 
@@ -92,18 +97,16 @@ export const GameView: React.FC<GameViewProps> = ({ settings, onLeave }) => {
     if (sceneRef.current) sceneRef.current.movementLocked = false;
   }, []);
 
-  useEffect(() => {
-    if (!work) return;
-    const id = setInterval(() => {
-      const w = workRef.current;
-      if (!w) return;
-      if (performance.now() - w.startedAt >= w.hold * 1000) {
-        net.completeTaskStep(w.taskId);
-        stopWork(false);
-      }
-    }, 50);
-    return () => clearInterval(id);
-  }, [work, stopWork]);
+  // The 2D mini-game reports success; we still respect the server's minimum task time.
+  const completeWork = useCallback(() => {
+    const w = workRef.current;
+    if (!w) return;
+    const wait = Math.max(0, w.hold * 1000 - (performance.now() - w.startedAt) + 150);
+    window.setTimeout(() => {
+      net.completeTaskStep(w.taskId);
+    }, wait);
+    stopWork(false);
+  }, [stopWork]);
 
   // Meetings, game over or leaving the station cancel any task in progress.
   useEffect(() => {
@@ -124,7 +127,14 @@ export const GameView: React.FC<GameViewProps> = ({ settings, onLeave }) => {
     }
     if (ctx.taskId && !workRef.current) {
       net.useTask(ctx.taskId);
-      setWork({ taskId: ctx.taskId, name: ctx.taskName || 'Task', hold: ctx.taskHold, startedAt: performance.now() });
+      setWork({
+        taskId: ctx.taskId,
+        name: ctx.taskName || 'Task',
+        hold: ctx.taskHold,
+        step: ctx.taskStep,
+        totalSteps: ctx.taskTotalSteps,
+        startedAt: performance.now(),
+      });
       if (sceneRef.current) sceneRef.current.movementLocked = true;
     }
   }, [playing, you, ctx]);
@@ -155,7 +165,7 @@ export const GameView: React.FC<GameViewProps> = ({ settings, onLeave }) => {
       } else if (e.code === 'KeyR') doReport();
       else if (e.code === 'KeyQ') doKill();
       else if (e.code === 'KeyF') doVent();
-      else if (e.code === 'Escape' && workRef.current) stopWork(true);
+      // Escape is handled by the open task window itself
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -202,6 +212,17 @@ export const GameView: React.FC<GameViewProps> = ({ settings, onLeave }) => {
         onJoystick={handleJoystick}
         onCameraSettings={handleCameraSettings}
       />
+
+      {work && playing && (
+        <TaskGame
+          taskId={work.taskId}
+          name={work.name}
+          step={work.step}
+          totalSteps={work.totalSteps}
+          onComplete={completeWork}
+          onClose={() => stopWork(true)}
+        />
+      )}
 
       {snapshot?.state === GAME_STATES.ROLE_REVEAL && <RoleReveal snapshot={snapshot} />}
       {snapshot?.state === GAME_STATES.MEETING && <MeetingOverlay snapshot={snapshot} />}

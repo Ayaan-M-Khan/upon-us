@@ -321,23 +321,6 @@ export const GameHud: React.FC<GameHudProps> = ({
         </div>
       </div>
 
-      {/* Task progress ("hold to work") */}
-      {work && (
-        <div className="absolute left-1/2 -translate-x-1/2 bottom-32 w-72 pointer-events-auto">
-          <div className="bg-slate-900/90 border-2 border-yellow-400 rounded-2xl p-3 shadow-2xl">
-            <div className="flex items-center justify-between mb-1.5">
-              <span className="text-sm font-black text-yellow-300">{work.name}</span>
-              <button onClick={onCancelWork} className="text-[11px] font-black text-slate-300 hover:text-white cursor-pointer">
-                CANCEL [Esc]
-              </button>
-            </div>
-            <div className="h-3 rounded-full bg-slate-700 overflow-hidden">
-              <div className="h-full bg-yellow-400" style={{ width: `${workPct}%` }} />
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Vent navigation */}
       {inVent && you && (
         <div className="absolute left-1/2 -translate-x-1/2 bottom-32 pointer-events-auto">
@@ -463,16 +446,13 @@ export const GameHud: React.FC<GameHudProps> = ({
                 ))}
                 {MAP_ROOMS_DETAIL.map((r) => (
                   <g key={r.id}>
-                    <rect
-                      x={r.bounds.minX}
-                      y={r.bounds.minZ}
-                      width={r.bounds.maxX - r.bounds.minX}
-                      height={r.bounds.maxZ - r.bounds.minZ}
-                      fill={r.floorHex}
-                      stroke={r.color}
-                      strokeWidth="0.5"
-                      opacity="0.95"
-                    />
+                    {/* outline pass, then fill pass, so chamfered rooms have no inner seams */}
+                    {r.rects.map((b, i) => (
+                      <rect key={`o${i}`} x={b.minX - 0.3} y={b.minZ - 0.3} width={b.maxX - b.minX + 0.6} height={b.maxZ - b.minZ + 0.6} fill={r.color} />
+                    ))}
+                    {r.rects.map((b, i) => (
+                      <rect key={`f${i}`} x={b.minX} y={b.minZ} width={b.maxX - b.minX} height={b.maxZ - b.minZ} fill={r.floorHex} />
+                    ))}
                     <text
                       x={r.labelPos.x}
                       y={r.labelPos.z}

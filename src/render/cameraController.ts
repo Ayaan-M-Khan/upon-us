@@ -107,6 +107,10 @@ export class CameraController {
     }
   }
 
+  private focus = new THREE.Vector3();
+  private focusReady = false;
+  private effDist = 6;
+
   public update(
     delta: number,
     targetPos: THREE.Vector3,
@@ -131,37 +135,39 @@ export class CameraController {
 
       this.camera.lookAt(lookX, lookY, lookZ);
     } else {
-      // Third person follow
-      const headPos = targetPos.clone().add(new THREE.Vector3(0, 1.1, 0));
+      // Third person follow.
+      // The camera follows a lightly smoothed focus point rigidly (so the character never jitters
+      // against the screen), zooms in instantly when a wall is in the way and eases back out.
+      const headTarget = targetPos.clone().add(new THREE.Vector3(0, 1.1, 0));
+      if (!this.focusReady || this.focus.distanceTo(headTarget) > 6) {
+        this.focus.copy(headTarget);
+        this.effDist = this.distance;
+        this.focusReady = true;
+      } else {
+        this.focus.x = THREE.MathUtils.damp(this.focus.x, headTarget.x, 28, delta);
+        this.focus.y = THREE.MathUtils.damp(this.focus.y, headTarget.y, 28, delta);
+        this.focus.z = THREE.MathUtils.damp(this.focus.z, headTarget.z, 28, delta);
+      }
 
-      // Intended camera offset
       const cosV = Math.cos(this.angleV);
       const sinV = Math.sin(this.angleV);
       const sinH = Math.sin(this.angleH);
       const cosH = Math.cos(this.angleH);
 
-      let effDist = this.distance;
+      const idealX = this.focus.x + sinH * cosV * this.distance;
+      const idealZ = this.focus.z + cosH * cosV * this.distance;
+      const wallCheck = lineIntersectsWalls(this.focus.x, this.focus.z, idealX, idealZ);
+      const allowed = wallCheck.hit ? Math.max(1.2, this.distance * wallCheck.distanceRatio * 0.88) : this.distance;
 
-      // Check line of sight against walls from head to intended camera position
-      const idealX = headPos.x + sinH * cosV * this.distance;
-      const idealZ = headPos.z + cosH * cosV * this.distance;
+      if (allowed < this.effDist) this.effDist = allowed;
+      else this.effDist = THREE.MathUtils.damp(this.effDist, allowed, 5, delta);
 
-      const wallCheck = lineIntersectsWalls(headPos.x, headPos.z, idealX, idealZ);
-      if (wallCheck.hit) {
-        // Pull camera inside wall border with safety margin
-        effDist = Math.max(1.2, this.distance * wallCheck.distanceRatio * 0.88);
-      }
-
-      const targetCamX = headPos.x + sinH * cosV * effDist;
-      const targetCamY = headPos.y + sinV * effDist;
-      const targetCamZ = headPos.z + cosH * cosV * effDist;
-
-      // Smooth camera damp
-      this.camera.position.x = THREE.MathUtils.damp(this.camera.position.x, targetCamX, 12, delta);
-      this.camera.position.y = THREE.MathUtils.damp(this.camera.position.y, targetCamY, 12, delta);
-      this.camera.position.z = THREE.MathUtils.damp(this.camera.position.z, targetCamZ, 12, delta);
-
-      this.camera.lookAt(headPos);
+      this.camera.position.set(
+        this.focus.x + sinH * cosV * this.effDist,
+        this.focus.y + sinV * this.effDist,
+        this.focus.z + cosH * cosV * this.effDist
+      );
+      this.camera.lookAt(this.focus);
     }
   }
 }
