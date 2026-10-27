@@ -53,7 +53,7 @@ import {
   getSpawnPosition,
 } from '../../shared/mapData';
 import { findPath } from '../../shared/nav';
-import { lineIntersectsWalls, resolveWallCollisions } from '../../shared/physics';
+import { lineIntersectsWalls, resolveMovementCollisions, resolveWallCollisions } from '../../shared/physics';
 import { generateBotMeetingStatement } from './meeting';
 import { GhostManager } from './ghostManager';
 import { assignRoles } from './roles';
@@ -264,7 +264,8 @@ export class GameRoom {
     let nz = p.z + dz;
     if (p.isAlive && !this.ghostManager.canNoclip(p.id)) {
       const activeWalls = getActiveWalls(this.sabotageManager.getLockedDoors());
-      const r = resolveWallCollisions(nx, nz, undefined, activeWalls);
+      // Match the client's wall AND furniture colliders so players cannot drift through props.
+      const r = resolveMovementCollisions(nx, nz, undefined, false, activeWalls);
       nx = r.x;
       nz = r.z;
     }
