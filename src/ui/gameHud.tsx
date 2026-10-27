@@ -1,6 +1,6 @@
 /**
  * Impostor Protocol - In-Game HUD & Map Overlay
- * Floating room banner, camera view toggle (V key), schematic map (Tab/M), and action buttons.
+ * Floating room banner, camera view toggle (C key), schematic map (Tab/M), and action buttons.
  */
 
 import React, { useEffect, useRef, useState } from 'react';
@@ -64,11 +64,11 @@ const ActionButton: React.FC<{
   title?: string;
 }> = ({ label, hint, enabled, onClick, tone, icon, badge, title }) => {
   const tones: Record<string, string> = {
-    use: 'from-cyan-500 to-blue-600 border-cyan-300 shadow-[0_8px_20px_rgba(6,182,212,0.4)]',
-    report: 'from-red-500 via-rose-600 to-amber-500 border-red-200 shadow-[0_8px_25px_rgba(239,68,68,0.7)] animate-pulse ring-4 ring-red-400/60',
-    kill: 'from-red-500 to-red-700 border-red-300 shadow-[0_8px_20px_rgba(239,68,68,0.45)]',
-    vent: 'from-slate-500 to-slate-700 border-slate-300 shadow-[0_8px_20px_rgba(100,116,139,0.4)]',
-    sabotage: 'from-rose-600 to-red-900 border-rose-300 shadow-[0_8px_20px_rgba(190,18,60,0.4)]',
+    use: 'from-[#20b8eb] to-[#1688bd] border-white shadow-[4px_4px_0_#070b15]',
+    report: 'from-[#ec5454] to-[#dc3434] border-white shadow-[4px_4px_0_#070b15]',
+    kill: 'from-[#eb4949] to-[#ab1f36] border-white shadow-[4px_4px_0_#070b15]',
+    vent: 'from-[#68758a] to-[#43516a] border-white shadow-[4px_4px_0_#070b15]',
+    sabotage: 'from-[#d73445] to-[#8b2333] border-white shadow-[4px_4px_0_#070b15]',
   };
   return (
     <button
@@ -78,10 +78,10 @@ const ActionButton: React.FC<{
         soundEngine.playClick();
         onClick();
       }}
-      className={`relative flex flex-col items-center justify-center w-[4.5rem] h-[4.5rem] sm:w-20 sm:h-20 rounded-3xl font-black border-2 transition-all ${
+      className={`relative flex flex-col items-center justify-center w-[4rem] h-[4rem] sm:w-[4.75rem] sm:h-[4.75rem] rounded-2xl font-black border-[3px] transition-all ${
         enabled
           ? `bg-gradient-to-br ${tones[tone]} text-white cursor-pointer active:scale-95`
-          : 'bg-slate-900/80 border-slate-700 text-slate-500 cursor-not-allowed opacity-70'
+          : 'bg-slate-900/85 border-white/25 text-slate-400 cursor-not-allowed opacity-65'
       }`}
     >
       {icon}
@@ -249,7 +249,7 @@ export const GameHud: React.FC<GameHudProps> = ({
   const cooldownSecs = you ? Math.ceil(you.killCooldownMs / 1000) : 0;
 
   return (
-    <div className="absolute inset-0 pointer-events-none select-none z-20 flex flex-col justify-between p-4">
+    <div className="absolute inset-0 pointer-events-none select-none z-20 flex flex-col justify-between p-2 sm:p-4">
       {/* CRITICAL SABOTAGE ALERT BANNER */}
       {isCriticalSabotage && (
         <div className="absolute top-4 left-1/2 -translate-x-1/2 pointer-events-auto z-30">
@@ -300,9 +300,9 @@ export const GameHud: React.FC<GameHudProps> = ({
       {/* TOP BAR */}
       <div className="w-full flex items-start justify-between">
         {/* Left: Global Task Completion Bar + task list */}
-        <div className="pointer-events-auto w-64 sm:w-80">
+        <div className="pointer-events-auto w-40 sm:w-64 lg:w-80">
           <GlobalTaskBar snapshot={snapshot} isImpostor={!!isImpostor} />
-          <div className="mt-1.5 rounded-xl bg-slate-900/80 border border-slate-700 backdrop-blur-md overflow-hidden">
+          <div className="mt-1.5 rounded-xl bg-black/85 border-2 border-white/60 backdrop-blur-md overflow-hidden">
             <button
               onClick={() => setShowTasks((v) => !v)}
               className="w-full flex items-center justify-between px-3 py-1.5 text-[11px] font-black tracking-widest text-slate-200 cursor-pointer"
@@ -338,8 +338,8 @@ export const GameHud: React.FC<GameHudProps> = ({
         </div>
 
         {/* Center: room banner */}
-        <div className="flex flex-col items-center">
-          <div className="bg-slate-900/90 backdrop-blur-md px-6 py-2 rounded-2xl border-2 border-slate-700/90 shadow-2xl flex items-center space-x-2.5">
+        <div className="hidden lg:flex flex-col items-center">
+          <div className="bg-black/85 backdrop-blur-md px-6 py-2 rounded-2xl border-[3px] border-white/80 shadow-[4px_4px_0_#050914] flex items-center space-x-2.5">
             <div className="w-3 h-3 rounded-full bg-cyan-400 shadow-[0_0_8px_rgba(56,189,248,0.8)] animate-pulse" />
             <span className="text-base sm:text-lg font-black tracking-widest uppercase text-transparent bg-clip-text bg-gradient-to-r from-cyan-300 to-sky-100">
               {currentRoom}
@@ -355,7 +355,7 @@ export const GameHud: React.FC<GameHudProps> = ({
               setShowMap((prev) => !prev);
             }}
             className={`p-2.5 rounded-2xl backdrop-blur-md border-2 transition-all cursor-pointer shadow-xl flex items-center space-x-2 ${
-              showMap ? 'bg-cyan-500 border-cyan-300 text-slate-950 font-black' : 'bg-slate-900/85 hover:bg-slate-800 border-slate-700/80 text-cyan-300'
+              showMap ? 'bg-cyan-500 border-cyan-300 text-slate-950 font-black' : 'bg-black/90 hover:bg-slate-800 border-white/80 text-white'
             }`}
             title="Toggle Map (Tab / M)"
           >
@@ -367,7 +367,7 @@ export const GameHud: React.FC<GameHudProps> = ({
               soundEngine.playClick();
               onToggleCamera();
             }}
-            className="p-2.5 rounded-2xl bg-slate-900/85 hover:bg-slate-800 backdrop-blur-md border-2 border-slate-700/80 text-slate-200 hover:text-white transition-all cursor-pointer shadow-xl"
+            className="p-2.5 rounded-2xl bg-black/90 hover:bg-slate-800 backdrop-blur-md border-2 border-white/80 text-slate-200 hover:text-white transition-all cursor-pointer shadow-xl"
             title="Toggle First / Third Person (C key)"
           >
             {cameraMode === 'third_person' ? <Eye className="w-5 h-5 text-cyan-400" /> : <Video className="w-5 h-5 text-yellow-400" />}
@@ -377,14 +377,14 @@ export const GameHud: React.FC<GameHudProps> = ({
               soundEngine.playClick();
               setShowSettings(true);
             }}
-            className="p-2.5 rounded-2xl bg-slate-900/85 hover:bg-slate-800 backdrop-blur-md border-2 border-slate-700/80 text-slate-300 hover:text-white transition-all shadow-xl cursor-pointer"
+            className="p-2.5 rounded-2xl bg-black/90 hover:bg-slate-800 backdrop-blur-md border-2 border-white/80 text-slate-300 hover:text-white transition-all shadow-xl cursor-pointer"
             title="Settings"
           >
             <Settings className="w-5 h-5" />
           </button>
           <button
             onClick={onLeave}
-            className="p-2.5 rounded-2xl bg-red-950/85 hover:bg-red-900 backdrop-blur-md border-2 border-red-700/80 text-red-200 hover:text-white transition-all shadow-xl cursor-pointer"
+            className="p-2.5 rounded-2xl bg-red-900/90 hover:bg-red-800 backdrop-blur-md border-2 border-white/80 text-red-200 hover:text-white transition-all shadow-xl cursor-pointer"
             title="Leave Match"
           >
             <LogOut className="w-5 h-5" />
@@ -445,12 +445,27 @@ export const GameHud: React.FC<GameHudProps> = ({
       <div className="w-full flex items-end justify-between">
         <div className="flex flex-col items-start space-y-2">
           {coarse && <Joystick onChange={onJoystick} />}
-          <div className="bg-slate-900/80 backdrop-blur-md p-3 rounded-2xl border border-slate-800 text-xs text-slate-400 font-medium hidden md:block">
+          {!coarse && (
+            <button
+              onClick={() => { soundEngine.playClick(); setShowMap(true); }}
+              title="Open ship map"
+              className="hidden md:block w-44 rounded-2xl border-[3px] border-white/80 bg-black/90 p-2 shadow-[4px_4px_0_#050914] hover:border-yellow-300 pointer-events-auto cursor-pointer"
+            >
+              <div className="text-[10px] font-black tracking-widest text-white mb-1 flex items-center justify-between"><span>SHIP MAP</span><span className="text-yellow-300">[M]</span></div>
+              <svg viewBox={`${MAP_BOUNDS.minX} ${MAP_BOUNDS.minZ} ${MAP_BOUNDS.maxX - MAP_BOUNDS.minX} ${MAP_BOUNDS.maxZ - MAP_BOUNDS.minZ}`} className="w-full h-auto" aria-hidden="true">
+                {MAP_CORRIDORS.map(c => <rect key={c.id} x={c.bounds.minX} y={c.bounds.minZ} width={c.bounds.maxX-c.bounds.minX} height={c.bounds.maxZ-c.bounds.minZ} fill="#64748b" />)}
+                {MAP_ROOMS_DETAIL.map(r => <rect key={r.id} x={r.bounds.minX} y={r.bounds.minZ} width={r.bounds.maxX-r.bounds.minX} height={r.bounds.maxZ-r.bounds.minZ} fill="#1e40af" stroke="#93c5fd" strokeWidth="0.7" />)}
+                {myTasks.filter(t => !t.done).map(t => <circle key={t.taskId} cx={t.x} cy={t.z} r="2" fill="#fde047" />)}
+                <circle cx={playerPos.x} cy={playerPos.z} r="2.5" fill="white" stroke="#0f172a" strokeWidth="0.7" />
+              </svg>
+            </button>
+          )}
+          <div className="bg-black/85 backdrop-blur-md p-3 rounded-2xl border-2 border-white/75 text-xs text-slate-400 font-medium hidden md:block">
             <div><strong className="text-cyan-300">WASD / Arrows:</strong> Walk</div>
             <div><strong className="text-cyan-300">Mouse Drag:</strong> Orbit Camera</div>
             <div><strong className="text-cyan-300">E / Space:</strong> Use • <strong className="text-cyan-300">R:</strong> Report</div>
             {isImpostor && <div><strong className="text-red-300">Q:</strong> Kill • <strong className="text-red-300">F:</strong> Vent</div>}
-            <div><strong className="text-emerald-400">V (Hold):</strong> Push-to-Talk • <strong className="text-cyan-300">Tab / M:</strong> Map</div>
+            <div><strong className="text-emerald-400">V (Hold):</strong> Talk • <strong className="text-cyan-300">C:</strong> Camera • <strong className="text-cyan-300">M:</strong> Map</div>
           </div>
         </div>
 
