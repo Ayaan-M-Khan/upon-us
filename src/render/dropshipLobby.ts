@@ -559,7 +559,7 @@ export class DropshipLobbyScene {
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(width, height);
-  }
+  };
 
   public dispose(): void {
     this.isDestroyed = true;
