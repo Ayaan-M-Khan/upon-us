@@ -248,6 +248,7 @@ export const GameView: React.FC<GameViewProps> = ({ settings, onLeave }) => {
       } else if (e.code === 'KeyR') doReport();
       else if (e.code === 'KeyQ') doKill();
       else if (e.code === 'KeyF') doVent();
+      else if (e.code === 'KeyC') setCameraMode(sceneRef.current?.cameraController.mode ?? 'third_person');
       else if (e.code === 'Escape' && workRef.current) stopWork(true);
     };
     window.addEventListener('keydown', onKey);
