@@ -1,6 +1,6 @@
 /**
  * Impostor Protocol - Camera Controller
- * Supports Third-Person over-the-shoulder follow with wall collision avoidance and First-Person toggle (V key).
+ * Supports Third-Person over-the-shoulder follow with wall collision avoidance and First-Person toggle (C key).
  */
 
 import * as THREE from 'three';
