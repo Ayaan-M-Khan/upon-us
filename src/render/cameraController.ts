@@ -50,15 +50,17 @@ export class CameraController {
   private onKeyDown = (e: KeyboardEvent): void => {
     const el = e.target as HTMLElement | null;
     if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) return;
-    if (e.code === 'KeyV' && !e.repeat) this.toggleViewMode();
+    // V is reserved for voice push-to-talk; C switches camera mode.
+    if (e.code === 'KeyC' && !e.repeat) this.toggleViewMode();
   };
 
   private onPointerDown = (e: PointerEvent): void => {
     // Only drag-rotate when the press lands on the 3D canvas, not on HUD buttons / menus.
-    if (!(e.target instanceof HTMLCanvasElement)) return;
+    if (!(e.target instanceof HTMLCanvasElement) || (e.pointerType === 'mouse' && e.button !== 0)) return;
     this.isDragging = true;
     this.lastPointerX = e.clientX;
     this.lastPointerY = e.clientY;
+    e.target.setPointerCapture?.(e.pointerId);
   };
 
   private onPointerMove = (e: PointerEvent): void => {
