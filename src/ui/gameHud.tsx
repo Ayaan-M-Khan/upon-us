@@ -368,7 +368,7 @@ export const GameHud: React.FC<GameHudProps> = ({
               onToggleCamera();
             }}
             className="p-2.5 rounded-2xl bg-slate-900/85 hover:bg-slate-800 backdrop-blur-md border-2 border-slate-700/80 text-slate-200 hover:text-white transition-all cursor-pointer shadow-xl"
-            title="Toggle First / Third Person (V key)"
+            title="Toggle First / Third Person (C key)"
           >
             {cameraMode === 'third_person' ? <Eye className="w-5 h-5 text-cyan-400" /> : <Video className="w-5 h-5 text-yellow-400" />}
           </button>
