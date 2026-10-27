@@ -5,6 +5,7 @@
 
 import * as THREE from 'three';
 import { PLAYER_COLORS } from '../../shared/constants';
+import { ChatScope } from '../../shared/events';
 
 export class CrewmateModel {
   public group: THREE.Group;
@@ -16,11 +17,15 @@ export class CrewmateModel {
   public rightLeg: THREE.Group;
   public hatGroup: THREE.Group;
   public nameTagMesh: THREE.Mesh | null = null;
+  public chatBubbleMesh: THREE.Mesh | null = null;
+  public speakingMesh: THREE.Mesh | null = null;
   public shadowMesh: THREE.Mesh;
 
   private bodyMaterial: THREE.MeshStandardMaterial;
   private walkTime: number = 0;
   private currentHatId: string = 'none';
+  private chatBubbleTimer: number = 0;
+  private isSpeaking: boolean = false;
 
   constructor(colorId: string = 'red', hatId: string = 'none', playerName: string = 'Player', isHost: boolean = false) {
     this.group = new THREE.Group();
@@ -297,6 +302,168 @@ export class CrewmateModel {
     this.group.add(this.nameTagMesh);
   }
 
+  public setSpeaking(speaking: boolean): void {
+    if (this.isSpeaking === speaking) return;
+    this.isSpeaking = speaking;
+
+    if (speaking) {
+      if (!this.speakingMesh) {
+        const canvas = document.createElement('canvas');
+        canvas.width = 160;
+        canvas.height = 64;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.clearRect(0, 0, 160, 64);
+
+          // Glowing emerald pill background
+          ctx.fillStyle = 'rgba(6, 78, 59, 0.95)';
+          ctx.beginPath();
+          ctx.roundRect(8, 8, 144, 48, 24);
+          ctx.fill();
+
+          ctx.strokeStyle = '#34d399';
+          ctx.lineWidth = 3;
+          ctx.shadowColor = '#10b981';
+          ctx.shadowBlur = 8;
+          ctx.stroke();
+
+          // Audio wave bars
+          ctx.shadowBlur = 0;
+          ctx.fillStyle = '#6ee7b7';
+          const barHeights = [14, 26, 36, 26, 14];
+          const startX = 38;
+          for (let i = 0; i < barHeights.length; i++) {
+            const h = barHeights[i];
+            const x = startX + i * 18;
+            const y = 32 - h / 2;
+            ctx.beginPath();
+            ctx.roundRect(x, y, 8, h, 4);
+            ctx.fill();
+          }
+
+          const texture = new THREE.CanvasTexture(canvas);
+          texture.colorSpace = THREE.SRGBColorSpace;
+          const geo = new THREE.PlaneGeometry(0.7, 0.28);
+          const mat = new THREE.MeshBasicMaterial({
+            map: texture,
+            transparent: true,
+            depthTest: false,
+          });
+
+          this.speakingMesh = new THREE.Mesh(geo, mat);
+          this.speakingMesh.position.y = 2.45;
+          this.speakingMesh.renderOrder = 1000;
+          this.group.add(this.speakingMesh);
+        }
+      }
+    } else {
+      if (this.speakingMesh) {
+        this.group.remove(this.speakingMesh);
+        if (this.speakingMesh.geometry) this.speakingMesh.geometry.dispose();
+        if (this.speakingMesh.material instanceof THREE.Material) {
+          this.speakingMesh.material.dispose();
+        }
+        this.speakingMesh = null;
+      }
+    }
+  }
+
+  public showChatBubble(text: string, scope: ChatScope = 'team'): void {
+    if (this.chatBubbleMesh) {
+      this.group.remove(this.chatBubbleMesh);
+      if (this.chatBubbleMesh.geometry) this.chatBubbleMesh.geometry.dispose();
+      if (this.chatBubbleMesh.material instanceof THREE.Material) this.chatBubbleMesh.material.dispose();
+      this.chatBubbleMesh = null;
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = 384;
+    canvas.height = 160;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    ctx.clearRect(0, 0, 384, 160);
+
+    // Bubble body background
+    ctx.beginPath();
+    ctx.roundRect(14, 10, 356, 115, 18);
+    // Speech bubble tail
+    ctx.moveTo(180, 125);
+    ctx.lineTo(192, 150);
+    ctx.lineTo(204, 125);
+    ctx.closePath();
+
+    if (scope === 'impostor') {
+      ctx.fillStyle = 'rgba(69, 10, 10, 0.94)';
+      ctx.strokeStyle = '#ef4444';
+    } else if (scope === 'haunt') {
+      ctx.fillStyle = 'rgba(59, 7, 100, 0.94)';
+      ctx.strokeStyle = '#c084fc';
+    } else if (scope === 'proximity') {
+      ctx.fillStyle = 'rgba(6, 78, 59, 0.94)';
+      ctx.strokeStyle = '#10b981';
+    } else {
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.94)';
+      ctx.strokeStyle = '#06b6d4';
+    }
+    ctx.fill();
+    ctx.lineWidth = 4;
+    ctx.stroke();
+
+    // Scope badge in corner
+    ctx.font = 'bold 16px Fredoka, sans-serif';
+    ctx.fillStyle = scope === 'impostor' ? '#fca5a5' : scope === 'proximity' ? '#6ee7b7' : '#67e8f9';
+    const tagText = scope === 'impostor' ? '• IMPOSTOR' : scope === 'proximity' ? '• PROXIMITY' : '• RADIO';
+    ctx.fillText(tagText, 26, 34);
+
+    // Truncate or wrap message
+    ctx.font = 'bold 22px Fredoka, Nunito, sans-serif';
+    ctx.fillStyle = '#ffffff';
+
+    const words = text.split(' ');
+    let line1 = '';
+    let line2 = '';
+    let currentLine = 1;
+
+    for (const w of words) {
+      const test = currentLine === 1 ? (line1 ? `${line1} ${w}` : w) : (line2 ? `${line2} ${w}` : w);
+      if (ctx.measureText(test).width < 320) {
+        if (currentLine === 1) line1 = test;
+        else line2 = test;
+      } else {
+        if (currentLine === 1) {
+          currentLine = 2;
+          line2 = w;
+        } else {
+          line2 += '…';
+          break;
+        }
+      }
+    }
+
+    if (line2) {
+      ctx.fillText(line1, 26, 66);
+      ctx.fillText(line2, 26, 98);
+    } else {
+      ctx.fillText(line1, 26, 78);
+    }
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    const bubbleGeo = new THREE.PlaneGeometry(2.4, 1.0);
+    const bubbleMat = new THREE.MeshBasicMaterial({
+      map: texture,
+      transparent: true,
+      depthTest: false,
+    });
+
+    this.chatBubbleMesh = new THREE.Mesh(bubbleGeo, bubbleMat);
+    this.chatBubbleMesh.position.y = 2.9;
+    this.chatBubbleMesh.renderOrder = 1000;
+    this.group.add(this.chatBubbleMesh);
+    this.chatBubbleTimer = 5.0;
+  }
+
   public updateAnimation(delta: number, isMoving: boolean, camera?: THREE.Camera): void {
     if (isMoving) {
       this.walkTime += delta * 12;
@@ -328,9 +495,50 @@ export class CrewmateModel {
     if (this.nameTagMesh && camera) {
       this.nameTagMesh.quaternion.copy(camera.quaternion);
     }
+
+    // Billboard speaking indicator to face camera & pulse
+    if (this.speakingMesh && camera) {
+      this.speakingMesh.quaternion.copy(camera.quaternion);
+      const pulse = 1.0 + Math.sin(this.walkTime * 10) * 0.08;
+      this.speakingMesh.scale.set(pulse, pulse, 1);
+    }
+
+    // Billboard chat bubble to face camera & handle timer
+    if (this.chatBubbleMesh) {
+      if (camera) {
+        this.chatBubbleMesh.quaternion.copy(camera.quaternion);
+      }
+      this.chatBubbleTimer -= delta;
+      if (this.chatBubbleTimer <= 0) {
+        this.group.remove(this.chatBubbleMesh);
+        if (this.chatBubbleMesh.geometry) this.chatBubbleMesh.geometry.dispose();
+        if (this.chatBubbleMesh.material instanceof THREE.Material) {
+          this.chatBubbleMesh.material.dispose();
+        }
+        this.chatBubbleMesh = null;
+      }
+    }
   }
 
   public dispose(): void {
+    if (this.speakingMesh) {
+      this.group.remove(this.speakingMesh);
+      if (this.speakingMesh.geometry) this.speakingMesh.geometry.dispose();
+      if (this.speakingMesh.material instanceof THREE.Material) {
+        this.speakingMesh.material.dispose();
+      }
+      this.speakingMesh = null;
+    }
+
+    if (this.chatBubbleMesh) {
+      this.group.remove(this.chatBubbleMesh);
+      if (this.chatBubbleMesh.geometry) this.chatBubbleMesh.geometry.dispose();
+      if (this.chatBubbleMesh.material instanceof THREE.Material) {
+        this.chatBubbleMesh.material.dispose();
+      }
+      this.chatBubbleMesh = null;
+    }
+
     this.group.traverse((obj) => {
       if (obj instanceof THREE.Mesh) {
         obj.geometry.dispose();

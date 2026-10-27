@@ -30,6 +30,9 @@ export const EVENTS = {
   CHAT_MESSAGE: 'chatMessage',
   CAST_VOTE: 'castVote',
   REJOIN: 'rejoin',
+  RTC_SIGNAL: 'rtcSignal',
+  VOICE_SPEAKING_UPDATE: 'voiceSpeakingUpdate',
+  RTC_INIT_PEER: 'rtcInitPeer',
 
   // Server -> Client
   LOBBY_STATE: 'lobbyState',
@@ -39,6 +42,7 @@ export const EVENTS = {
   GAME_STARTED: 'gameStarted',
   STATE_SNAPSHOT: 'stateSnapshot',
   PLAYER_KILLED: 'playerKilled',
+  BODY_DISCOVERED: 'bodyDiscovered',
   BODY_LIST: 'bodyList',
   MEETING_STARTED: 'meetingStarted',
   CHAT_BROADCAST: 'chatBroadcast',
@@ -117,6 +121,33 @@ export interface BodyView {
   colorId: string;
   x: number;
   z: number;
+  room?: string;
+}
+
+export interface PlayerKilledPayload {
+  victimId: string;
+  victimName: string;
+  victimColorId: string;
+  killerId: string;
+  killerName?: string;
+  x: number;
+  z: number;
+  room?: string;
+  impulseX: number;
+  impulseZ: number;
+  timestamp: number;
+}
+
+export interface BodyDiscoveredPayload {
+  bodyId: string;
+  victimColorId: string;
+  discovererId: string;
+  discovererName: string;
+  discovererColorId: string;
+  room?: string;
+  x: number;
+  z: number;
+  timestamp: number;
 }
 
 export interface MeetingResults {
@@ -130,14 +161,34 @@ export interface MeetingResults {
   impostorsRemaining?: number; // only when confirmEjects is on
 }
 
+export interface MeetingIncidentLogEntry {
+  id: string;
+  roundNumber: number;
+  callerId: string;
+  callerName: string;
+  callerColorId: string;
+  reason: 'body' | 'emergency';
+  bodyColorId?: string;
+  bodyRoom?: string;
+  timestamp: number;
+  timeFormatted: string;
+  outcome?: 'ejected' | 'skip' | 'tie';
+  ejectedName?: string;
+  ejectedColorId?: string;
+  wasImpostor?: boolean;
+}
+
 export interface MeetingView {
   phase: 'INTRO' | 'DISCUSSION' | 'VOTING' | 'RESULTS' | 'EJECTION';
   remainingMs: number;
   callerName: string;
+  callerColorId?: string;
   reason: 'body' | 'emergency';
   bodyColorId?: string;
+  bodyRoom?: string;
   voted: string[];
   results?: MeetingResults;
+  history?: MeetingIncidentLogEntry[];
 }
 
 export interface YouView {
@@ -149,6 +200,7 @@ export interface YouView {
   emergencyCooldownMs: number;
   ventId: string | null;
   ventLinks: { id: string; x: number; z: number }[];
+  sabotageCooldownMs?: number;
 }
 
 export interface ChatMessage {
@@ -160,10 +212,60 @@ export interface ChatMessage {
   ghost: boolean;
 }
 
+export type SabotageType = 'lights' | 'reactor' | 'o2' | 'doors';
+
+export interface ActiveSabotageState {
+  type: SabotageType;
+  countdown: number; // For reactor/o2 (45s -> 0)
+  targetRoom?: 'Cafeteria' | 'Storage'; // For doors
+  doorsRemaining?: number; // For doors (10s -> 0)
+  switches?: boolean[]; // 5 switches for electrical lights
+  reactorPads?: { top: boolean; bottom: boolean }; // 2 pads for reactor
+  o2Pads?: { o2: boolean; admin: boolean }; // 2 pads for o2
+  activatedAt: number;
+}
+
+export interface SabotageTriggerPayload {
+  type: SabotageType;
+  room?: 'Cafeteria' | 'Storage';
+}
+
+export interface FixSabotagePayload {
+  type: SabotageType;
+  switchIndex?: number;
+  pad?: 'top' | 'bottom' | 'o2' | 'admin';
+}
+
+export interface PlayerMatchStats {
+  tasksCompleted: number;
+  totalTasks: number;
+  timesSabotaged: number;
+  sabotagesFixed: number;
+  killsCount: number;
+  bodiesReported: number;
+  emergenciesCalled: number;
+  survived: boolean;
+  eliminationReason?: 'alive' | 'killed' | 'ejected';
+}
+
+export interface GameOverPlayerSummary {
+  id: string;
+  name: string;
+  colorId: string;
+  role: Role;
+  isBot: boolean;
+  stats?: PlayerMatchStats;
+}
+
 export interface GameOverInfo {
   winner: 'crewmates' | 'impostors';
   reason: string;
-  players: { id: string; name: string; colorId: string; role: Role; isBot: boolean }[];
+  players: GameOverPlayerSummary[];
+  matchDurationSecs?: number;
+  totalTasksDone?: number;
+  totalTasksAvailable?: number;
+  totalSabotagesTriggered?: number;
+  totalBodiesFound?: number;
 }
 
 export interface GameStateSnapshot {
@@ -173,6 +275,33 @@ export interface GameStateSnapshot {
   bodies?: BodyView[];
   meeting?: MeetingView;
   taskProgress?: number; // 0..1
+  tasksCompleted?: number;
+  totalTasks?: number;
   you?: YouView;
   winner?: 'crewmates' | 'impostors';
+  sabotage?: ActiveSabotageState | null;
+  lockedDoors?: ('Cafeteria' | 'Storage')[];
+  meetingHistory?: MeetingIncidentLogEntry[];
+}
+
+export type ChatScope = 'team' | 'proximity' | 'impostor' | 'haunt';
+
+export interface ChatMessagePayload {
+  text: string;
+  scope?: ChatScope;
+}
+
+export interface ChatBroadcastMessage {
+  id: string;
+  senderId: string;
+  senderName: string;
+  senderColorId: string;
+  senderHatId?: string;
+  text: string;
+  scope: ChatScope;
+  timestamp: number;
+  senderRoom?: string;
+  senderX?: number;
+  senderZ?: number;
+  distance?: number;
 }

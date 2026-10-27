@@ -6,12 +6,32 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { GAME_STATES, GameSettings } from '../../shared/constants';
-import { GameOverInfo, GameStateSnapshot } from '../../shared/events';
+import { BodyDiscoveredPayload, GameOverInfo, GameStateSnapshot } from '../../shared/events';
+import { soundEngine } from '../audio';
 import { net } from '../net';
 import { CameraViewMode } from '../render/cameraController';
 import { GameScene, InteractionContext } from '../render/gameScene';
+import { proximityVoice } from '../audio/proximityVoice';
 import { GameHud } from './gameHud';
-import { GameOverOverlay, MeetingOverlay, RoleReveal } from './gameOverlays';
+import { VoiceHud } from './voiceHud';
+import {
+  AdminMapOverlay,
+  BreakerPanelOverlay,
+  GameOverOverlay,
+  MeetingOverlay,
+  O2KeypadOverlay,
+  ReactorPanelOverlay,
+  RoleReveal,
+  SabotageMapOverlay,
+  SecurityCamerasOverlay,
+} from './gameOverlays';
+import {
+  ClearAsteroidsModal,
+  FixWiringModal,
+  GenericTaskModal,
+  SwipeCardModal,
+  UnlockManifoldsModal,
+} from './taskMiniGames';
 
 interface GameViewProps {
   settings: GameSettings;
@@ -26,6 +46,11 @@ const EMPTY_CTX: InteractionContext = {
   reportBodyId: null,
   ventId: null,
   emergency: false,
+  adminConsole: false,
+  securityConsole: false,
+  breakerPanel: false,
+  reactorHandpad: null,
+  o2Keypad: null,
 };
 
 export interface WorkState {
@@ -52,6 +77,14 @@ export const GameView: React.FC<GameViewProps> = ({ settings, onLeave }) => {
   const workRef = useRef<WorkState | null>(null);
   workRef.current = work;
 
+  const [showSabotageMap, setShowSabotageMap] = useState(false);
+  const [showAdminMap, setShowAdminMap] = useState(false);
+  const [showSecurityCams, setShowSecurityCams] = useState(false);
+  const [showBreakerPanel, setShowBreakerPanel] = useState(false);
+  const [showReactorPanel, setShowReactorPanel] = useState<'top' | 'bottom' | null>(null);
+  const [showO2Keypad, setShowO2Keypad] = useState<'o2' | 'admin' | null>(null);
+  const [discoveredBodyAlert, setDiscoveredBodyAlert] = useState<BodyDiscoveredPayload | null>(null);
+
   const socketId = net.getSocketId() || '';
 
   useEffect(() => {
@@ -62,28 +95,68 @@ export const GameView: React.FC<GameViewProps> = ({ settings, onLeave }) => {
     let lastReact = 0;
     const unsubSnapshot = net.onSnapshot((s: GameStateSnapshot) => {
       scene.handleSnapshot(s);
+      proximityVoice.syncActivePeers(Object.keys(s.players));
+      const myP = s.players[socketId];
+      const amAlive = myP ? myP.isAlive : true;
+      proximityVoice.updateSpatialPositions(
+        { x: scene.localPos.x, z: scene.localPos.z },
+        s.players,
+        amAlive,
+        s.state === GAME_STATES.MEETING
+      );
+
       const now = performance.now();
       // React re-renders at ~10 Hz; the 3D scene gets every snapshot.
       if (now - lastReact > 90 || s.state !== GAME_STATES.PLAYING) {
         lastReact = now;
         setSnapshot(s);
       }
+      if (s.state === GAME_STATES.MEETING || s.state === GAME_STATES.GAME_OVER) {
+        setDiscoveredBodyAlert(null);
+        soundEngine.setAmbientVolume?.(0.12);
+      } else if (s.state === GAME_STATES.PLAYING) {
+        soundEngine.setAmbientVolume?.(0.45);
+      }
     });
     const unsubOver = net.onGameOver((g) => setGameOver(g));
+    const unsubDiscovery = net.onBodyDiscovered((payload) => {
+      setDiscoveredBodyAlert(payload);
+      soundEngine.playBodyDiscoveredSting();
+    });
 
     const timer = setInterval(() => {
       setPlayerPos({ x: scene.localPos.x, z: scene.localPos.z });
       setCtx(scene.computeContext());
+
+      if (scene.latest) {
+        const myP = scene.latest.players[socketId];
+        const amAlive = myP ? myP.isAlive : true;
+        proximityVoice.updateSpatialPositions(
+          { x: scene.localPos.x, z: scene.localPos.z },
+          scene.latest.players,
+          amAlive,
+          scene.latest.state === GAME_STATES.MEETING
+        );
+      }
     }, 100);
 
     return () => {
       unsubSnapshot();
       unsubOver();
+      unsubDiscovery();
       clearInterval(timer);
+      proximityVoice.dispose();
       scene.dispose();
       sceneRef.current = null;
     };
   }, [socketId]);
+
+  // Auto-dismiss body discovery banner after 6.5s
+  useEffect(() => {
+    if (!discoveredBodyAlert) return;
+    const t = setTimeout(() => setDiscoveredBodyAlert(null), 6500);
+    return () => clearTimeout(t);
+  }, [discoveredBodyAlert]);
 
   // ---- Task work (hold at a station) ----
   const stopWork = useCallback((notifyServer: boolean) => {
@@ -92,23 +165,20 @@ export const GameView: React.FC<GameViewProps> = ({ settings, onLeave }) => {
     if (sceneRef.current) sceneRef.current.movementLocked = false;
   }, []);
 
-  useEffect(() => {
-    if (!work) return;
-    const id = setInterval(() => {
-      const w = workRef.current;
-      if (!w) return;
-      if (performance.now() - w.startedAt >= w.hold * 1000) {
-        net.completeTaskStep(w.taskId);
-        stopWork(false);
-      }
-    }, 50);
-    return () => clearInterval(id);
-  }, [work, stopWork]);
+  // Task completion is driven interactively by the player completing the 2D mini-game modals
 
-  // Meetings, game over or leaving the station cancel any task in progress.
+  // Meetings, game over or leaving the station cancel any task in progress and close modals.
   useEffect(() => {
-    if (work && snapshot && snapshot.state !== GAME_STATES.PLAYING) stopWork(false);
-    if (snapshot && snapshot.state !== GAME_STATES.PLAYING) sceneRef.current?.clearInput();
+    if (snapshot && snapshot.state !== GAME_STATES.PLAYING) {
+      if (work) stopWork(false);
+      sceneRef.current?.clearInput();
+      setShowSabotageMap(false);
+      setShowAdminMap(false);
+      setShowSecurityCams(false);
+      setShowBreakerPanel(false);
+      setShowReactorPanel(null);
+      setShowO2Keypad(null);
+    }
   }, [snapshot, work, stopWork]);
 
   const you = snapshot?.you;
@@ -122,6 +192,26 @@ export const GameView: React.FC<GameViewProps> = ({ settings, onLeave }) => {
       net.callEmergency();
       return;
     }
+    if (ctx.breakerPanel) {
+      setShowBreakerPanel(true);
+      return;
+    }
+    if (ctx.reactorHandpad) {
+      setShowReactorPanel(ctx.reactorHandpad);
+      return;
+    }
+    if (ctx.o2Keypad) {
+      setShowO2Keypad(ctx.o2Keypad);
+      return;
+    }
+    if (ctx.adminConsole) {
+      setShowAdminMap(true);
+      return;
+    }
+    if (ctx.securityConsole) {
+      setShowSecurityCams(true);
+      return;
+    }
     if (ctx.taskId && !workRef.current) {
       net.useTask(ctx.taskId);
       setWork({ taskId: ctx.taskId, name: ctx.taskName || 'Task', hold: ctx.taskHold, startedAt: performance.now() });
@@ -130,7 +220,10 @@ export const GameView: React.FC<GameViewProps> = ({ settings, onLeave }) => {
   }, [playing, you, ctx]);
 
   const doReport = useCallback(() => {
-    if (playing && ctx.reportBodyId) net.reportBody(ctx.reportBodyId);
+    if (playing && ctx.reportBodyId) {
+      soundEngine.playReportSting();
+      net.reportBody(ctx.reportBodyId);
+    }
   }, [playing, ctx.reportBodyId]);
 
   const doKill = useCallback(() => {
@@ -201,14 +294,94 @@ export const GameView: React.FC<GameViewProps> = ({ settings, onLeave }) => {
         onCancelWork={() => stopWork(true)}
         onJoystick={handleJoystick}
         onCameraSettings={handleCameraSettings}
+        onOpenSabotage={() => setShowSabotageMap(true)}
+        discoveredBodyAlert={discoveredBodyAlert}
+        onDismissDiscovery={() => setDiscoveredBodyAlert(null)}
       />
+
+      <VoiceHud snapshot={snapshot} />
+
+      {showSabotageMap && snapshot && (
+        <SabotageMapOverlay snapshot={snapshot} onClose={() => setShowSabotageMap(false)} />
+      )}
+      {showAdminMap && snapshot && (
+        <AdminMapOverlay snapshot={snapshot} onClose={() => setShowAdminMap(false)} />
+      )}
+      {showSecurityCams && snapshot && (
+        <SecurityCamerasOverlay snapshot={snapshot} onClose={() => setShowSecurityCams(false)} />
+      )}
+      {showBreakerPanel && snapshot && (
+        <BreakerPanelOverlay snapshot={snapshot} onClose={() => setShowBreakerPanel(false)} />
+      )}
+      {showReactorPanel && snapshot && (
+        <ReactorPanelOverlay pad={showReactorPanel} snapshot={snapshot} onClose={() => setShowReactorPanel(null)} />
+      )}
+      {showO2Keypad && snapshot && (
+        <O2KeypadOverlay pad={showO2Keypad} snapshot={snapshot} onClose={() => setShowO2Keypad(null)} />
+      )}
+
+      {/* Interactive 2D Task Mini-Games */}
+      {work && (
+        work.taskId === 'fix_wiring' || work.name.toLowerCase().includes('wiring') ? (
+          <FixWiringModal
+            taskName={work.name}
+            onComplete={() => {
+              net.completeTaskStep(work.taskId);
+              stopWork(false);
+            }}
+            onClose={() => stopWork(true)}
+          />
+        ) : work.taskId === 'swipe_card' || work.name.toLowerCase().includes('card') || work.name.toLowerCase().includes('swipe') ? (
+          <SwipeCardModal
+            taskName={work.name}
+            onComplete={() => {
+              net.completeTaskStep(work.taskId);
+              stopWork(false);
+            }}
+            onClose={() => stopWork(true)}
+          />
+        ) : work.taskId === 'clear_asteroids' || work.name.toLowerCase().includes('asteroid') ? (
+          <ClearAsteroidsModal
+            taskName={work.name}
+            onComplete={() => {
+              net.completeTaskStep(work.taskId);
+              stopWork(false);
+            }}
+            onClose={() => stopWork(true)}
+          />
+        ) : work.taskId === 'unlock_manifolds' || work.name.toLowerCase().includes('manifold') ? (
+          <UnlockManifoldsModal
+            taskName={work.name}
+            onComplete={() => {
+              net.completeTaskStep(work.taskId);
+              stopWork(false);
+            }}
+            onClose={() => stopWork(true)}
+          />
+        ) : (
+          <GenericTaskModal
+            taskName={work.name}
+            holdSeconds={work.hold || 3}
+            onComplete={() => {
+              net.completeTaskStep(work.taskId);
+              stopWork(false);
+            }}
+            onClose={() => stopWork(true)}
+          />
+        )
+      )}
 
       {snapshot?.state === GAME_STATES.ROLE_REVEAL && <RoleReveal snapshot={snapshot} />}
       {snapshot?.state === GAME_STATES.MEETING && <MeetingOverlay snapshot={snapshot} />}
       {gameOver && snapshot?.state === GAME_STATES.GAME_OVER && <GameOverOverlay info={gameOver} />}
       {me && !me.isAlive && playing && (
-        <div className="absolute top-20 left-1/2 -translate-x-1/2 z-20 px-4 py-1.5 rounded-full bg-slate-800/80 text-slate-300 text-xs font-black tracking-widest pointer-events-none">
-          {you?.role === 'impostor' ? '👻 YOU ARE A GHOST' : '👻 YOU ARE A GHOST — FINISH YOUR TASKS TO HELP THE CREW'}
+        <div className="absolute top-20 left-1/2 -translate-x-1/2 z-20 px-5 py-2 rounded-2xl bg-purple-950/90 backdrop-blur-md border border-purple-500/50 text-purple-200 text-xs font-black tracking-widest shadow-[0_0_20px_rgba(168,85,247,0.3)] pointer-events-none flex items-center space-x-2">
+          <span className="w-2 h-2 rounded-full bg-purple-400 animate-ping" />
+          <span>
+            {you?.role === 'impostor'
+              ? '👻 GHOST MODE · NOCLIP THROUGH WALLS ENABLED · HAUNT CHAT ONLY'
+              : '👻 GHOST MODE · NOCLIP THROUGH WALLS ENABLED · COMPLETE TASKS TO ADVANCE METER'}
+          </span>
         </div>
       )}
     </div>

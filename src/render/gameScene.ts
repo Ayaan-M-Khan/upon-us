@@ -14,18 +14,22 @@ import {
   VENT_RANGE,
 } from '../../shared/constants';
 import { GAME_STATES } from '../../shared/constants';
-import { GameStateSnapshot, TaskView } from '../../shared/events';
+import { BodyDiscoveredPayload, GameStateSnapshot, PlayerKilledPayload, TaskView } from '../../shared/events';
 import {
   EMERGENCY_BUTTON_POS,
   EMERGENCY_BUTTON_RANGE,
   MAP_VENTS,
   detectRoom,
+  getActiveWalls,
 } from '../../shared/mapData';
-import { resolveWallCollisions } from '../../shared/physics';
+import { lineIntersectsWalls, resolveMovementCollisions } from '../../shared/physics';
 import { net } from '../net';
+import { soundEngine } from '../audio';
+import { proximityVoice } from '../audio/proximityVoice';
 import { CameraController } from './cameraController';
 import { CrewmateModel } from './crewmateModel';
 import { Map3D } from './map3D';
+import { BodyDiscoveryBeacon, CorpseModel, RagdollDeathAnimation } from './ragdoll';
 
 export interface InteractionContext {
   taskId: string | null;
@@ -35,6 +39,11 @@ export interface InteractionContext {
   reportBodyId: string | null;
   ventId: string | null;
   emergency: boolean;
+  adminConsole: boolean;
+  securityConsole: boolean;
+  breakerPanel: boolean;
+  reactorHandpad: 'top' | 'bottom' | null;
+  o2Keypad: 'o2' | 'admin' | null;
 }
 
 const EMPTY_CONTEXT: InteractionContext = {
@@ -45,6 +54,11 @@ const EMPTY_CONTEXT: InteractionContext = {
   reportBodyId: null,
   ventId: null,
   emergency: false,
+  adminConsole: false,
+  securityConsole: false,
+  breakerPanel: false,
+  reactorHandpad: null,
+  o2Keypad: null,
 };
 
 /** Keys that should never be captured while the player is typing in chat, etc. */
@@ -92,10 +106,15 @@ export class GameScene {
   private joystickVector = { x: 0, y: 0 };
   private inputSeq = 0;
   private lastInputSendTime = 0;
+  private lastFootstepTime = 0;
 
   // Actors
   private playerModels: Map<string, CrewmateModel> = new Map();
-  private bodyModels: Map<string, CrewmateModel> = new Map();
+  private bodyModels: Map<string, CorpseModel> = new Map();
+  private activeDeathAnimations: RagdollDeathAnimation[] = [];
+  private activeDiscoveryBeacons: BodyDiscoveryBeacon[] = [];
+  private unsubscribeKill?: () => void;
+  private unsubscribeDiscovery?: () => void;
   private ghostApplied: Set<string> = new Set();
   private remoteTargets: Map<string, { x: number; z: number; rotation: number; isMoving: boolean }> = new Map();
   private taskMarkerGroup = new THREE.Group();
@@ -141,7 +160,15 @@ export class GameScene {
     this.cameraController = new CameraController(this.camera);
     this.bindInputs();
 
+    this.unsubscribeKill = net.onPlayerKilled((payload) => {
+      this.triggerDeathAnimation(payload);
+    });
+    this.unsubscribeDiscovery = net.onBodyDiscovered((payload) => {
+      this.triggerBodyDiscovery(payload);
+    });
+
     if (import.meta.env?.DEV) (window as unknown as { __gameScene?: GameScene }).__gameScene = this; // dev-only test hook
+    soundEngine.startShipHum();
     this.tick = this.tick.bind(this);
     this.animationFrameId = requestAnimationFrame(this.tick);
   }
@@ -263,10 +290,8 @@ export class GameScene {
     const bodyIds = new Set((snapshot.bodies || []).map((b) => b.id));
     for (const b of snapshot.bodies || []) {
       if (this.bodyModels.has(b.id)) continue;
-      const m = new CrewmateModel(b.colorId, 'none', '', false);
-      if (m.nameTagMesh) m.nameTagMesh.visible = false;
-      m.group.position.set(b.x, 0.5, b.z);
-      m.group.rotation.set(0, Math.random() * Math.PI * 2, Math.PI / 2);
+      const m = new CorpseModel(b.colorId, Math.random() * Math.PI * 2);
+      m.group.position.set(b.x, 0, b.z);
       this.scene.add(m.group);
       this.bodyModels.set(b.id, m);
     }
@@ -367,6 +392,29 @@ export class GameScene {
           }
         }
       }
+
+      // Consoles & Sabotage fix stations
+      const admDist = Math.hypot(px - 15, pz - 0);
+      ctx.adminConsole = admDist <= 3.2;
+
+      const secDist = Math.hypot(px - (-27), pz - (-2));
+      ctx.securityConsole = secDist <= 3.0;
+
+      const sab = snap.sabotage;
+      if (sab?.type === 'lights') {
+        const elecDist = Math.hypot(px - (-24), pz - 16);
+        ctx.breakerPanel = elecDist <= 3.5;
+      } else if (sab?.type === 'reactor') {
+        const topDist = Math.hypot(px - (-52), pz - (-8));
+        const btmDist = Math.hypot(px - (-52), pz - 2);
+        if (topDist <= 3.0) ctx.reactorHandpad = 'top';
+        else if (btmDist <= 3.0) ctx.reactorHandpad = 'bottom';
+      } else if (sab?.type === 'o2') {
+        const o2Dist = Math.hypot(px - 25, pz - (-16));
+        const admO2Dist = Math.hypot(px - 18, pz - (-4));
+        if (o2Dist <= 3.0) ctx.o2Keypad = 'o2';
+        else if (admO2Dist <= 3.0) ctx.o2Keypad = 'admin';
+      }
     }
     return ctx;
   }
@@ -402,6 +450,11 @@ export class GameScene {
     const meAlive = me ? me.isAlive : true;
     const inVent = !!snap?.you?.ventId;
     const canMove = !!snap && snap.state === GAME_STATES.PLAYING && !this.movementLocked && !inVent;
+
+    const activeWalls = getActiveWalls(snap?.lockedDoors);
+    const isImpostor = snap?.you?.role === 'impostor';
+    const lightsOut = snap?.sabotage?.type === 'lights';
+    const visionRadius = !meAlive ? 999 : (lightsOut && !isImpostor ? 5.2 : 16.0);
 
     // 1. Local movement: rebuilt from the keys held *this frame* and eased with a short velocity ramp.
     let moveX = 0;
@@ -440,14 +493,27 @@ export class GameScene {
     if (this.isMoving) {
       let tx = this.localPos.x + this.velocity.x * delta;
       let tz = this.localPos.z + this.velocity.y * delta;
-      if (meAlive) {
-        const r = resolveWallCollisions(tx, tz);
-        tx = r.x;
-        tz = r.z;
-      }
+
+      const r = resolveMovementCollisions(tx, tz, undefined, !meAlive, activeWalls);
+      tx = r.x;
+      tz = r.z;
+
       this.localPos.x = tx;
       this.localPos.z = tz;
       this.localRotation = Math.atan2(this.velocity.x, this.velocity.y);
+
+      // Play footstep audio with room acoustics and dynamic position-based pitch/panning
+      const stepInterval = Math.max(180, 310 / Math.max(0.6, this.playerSpeedMultiplier));
+      if (meAlive && now - this.lastFootstepTime > stepInterval) {
+        this.lastFootstepTime = now;
+        soundEngine.playFootstep(
+          this.localPos.x,
+          this.localPos.z,
+          this.currentRoom,
+          this.playerSpeedMultiplier,
+          meAlive
+        );
+      }
 
       const room = detectRoom(this.localPos.x, this.localPos.z);
       if (room !== this.currentRoom) {
@@ -477,6 +543,7 @@ export class GameScene {
       localModel.group.position.copy(this.localPos);
       localModel.group.rotation.y = this.localRotation;
       localModel.updateAnimation(delta, this.isMoving, this.camera);
+      localModel.setSpeaking(proximityVoice.getState().isTransmitting);
 
       const isFP = this.cameraController.mode === 'first_person';
       const hidden = isFP || inVent;
@@ -488,7 +555,7 @@ export class GameScene {
       this.applyGhostLook(this.localPlayerId, localModel, !meAlive);
     }
 
-    // 4. Remote players: interpolate, and hide ghosts from the living / vented impostors from everyone
+    // 4. Remote players: interpolate, and hide ghosts from the living / vented impostors from everyone / Fog-of-War
     for (const [id, target] of this.remoteTargets) {
       const model = this.playerModels.get(id);
       if (!model) continue;
@@ -507,22 +574,100 @@ export class GameScene {
       dr = Math.atan2(Math.sin(dr), Math.cos(dr));
       model.group.rotation.y += dr * Math.min(1, delta * 14);
       model.updateAnimation(delta, target.isMoving, this.camera);
+      model.setSpeaking(proximityVoice.isPeerSpeaking(id));
 
       if (p) {
-        model.group.visible = p.isAlive ? !p.inVent : !meAlive;
+        let isVis = false;
+        if (!meAlive) {
+          isVis = true;
+        } else if (!p.isAlive || p.inVent) {
+          isVis = false;
+        } else {
+          const dToP = Math.hypot(target.x - this.localPos.x, target.z - this.localPos.z);
+          if (dToP <= visionRadius) {
+            const los = lineIntersectsWalls(this.localPos.x, this.localPos.z, target.x, target.z, activeWalls);
+            isVis = !los.hit;
+          }
+        }
+        model.group.visible = isVis;
         this.applyGhostLook(id, model, !p.isAlive);
       }
     }
 
-    // 5. Camera, light, ambience
+    // 5. Dead bodies Fog-of-War & line-of-sight
+    for (const [id, m] of this.bodyModels) {
+      const b = (snap?.bodies || []).find((x) => x.id === id);
+      if (b) {
+        let isVis = false;
+        if (!meAlive) {
+          isVis = true;
+        } else {
+          const dToB = Math.hypot(b.x - this.localPos.x, b.z - this.localPos.z);
+          if (dToB <= visionRadius) {
+            const los = lineIntersectsWalls(this.localPos.x, this.localPos.z, b.x, b.z, activeWalls);
+            isVis = !los.hit;
+          }
+        }
+        m.group.visible = isVis;
+      }
+    }
+
+    // 6. Active ragdoll death animations & blood splatter
+    for (let i = this.activeDeathAnimations.length - 1; i >= 0; i--) {
+      const anim = this.activeDeathAnimations[i];
+      const finished = anim.update(delta);
+      if (finished) {
+        this.scene.remove(anim.group);
+        anim.dispose();
+        this.activeDeathAnimations.splice(i, 1);
+      }
+    }
+
+    // 7. Active 3D body discovery beacons
+    for (let i = this.activeDiscoveryBeacons.length - 1; i >= 0; i--) {
+      const beacon = this.activeDiscoveryBeacons[i];
+      const finished = beacon.update(delta);
+      if (finished) {
+        this.scene.remove(beacon.group);
+        beacon.dispose();
+        this.activeDiscoveryBeacons.splice(i, 1);
+      }
+    }
+
+    // 8. Dynamic procedural ship hum modulation based on player position & acoustics
+    soundEngine.updateShipHum(this.localPos.x, this.localPos.z, this.currentRoom);
+
+    // 9. Camera, light, ambience
     this.cameraController.update(delta, this.localPos, this.isMoving);
     this.keyLight.position.set(this.localPos.x + 15, 30, this.localPos.z - 10);
     this.keyLight.target.position.set(this.localPos.x, 0, this.localPos.z);
     this.taskMarkerGroup.rotation.y += delta * 0.8;
-    this.map3D.update(delta);
+    this.map3D.update(delta, snap?.lockedDoors, lightsOut);
 
     this.renderer.render(this.scene, this.camera);
     this.animationFrameId = requestAnimationFrame(this.tick);
+  }
+
+  public triggerDeathAnimation(payload: PlayerKilledPayload): void {
+    const ragdoll = new RagdollDeathAnimation(
+      payload.x,
+      payload.z,
+      payload.victimColorId,
+      payload.impulseX,
+      payload.impulseZ
+    );
+    this.scene.add(ragdoll.group);
+    this.activeDeathAnimations.push(ragdoll);
+
+    if (payload.victimId === this.localPlayerId) {
+      this.cameraController.shake(0.65, 0.45);
+    }
+  }
+
+  public triggerBodyDiscovery(payload: BodyDiscoveredPayload): void {
+    const beacon = new BodyDiscoveryBeacon(payload.x, payload.z, payload.victimColorId);
+    this.scene.add(beacon.group);
+    this.activeDiscoveryBeacons.push(beacon);
   }
 
   private onResize = (): void => {
@@ -550,6 +695,22 @@ export class GameScene {
     for (const model of this.bodyModels.values()) model.dispose();
     this.playerModels.clear();
     this.bodyModels.clear();
+
+    for (const anim of this.activeDeathAnimations) {
+      this.scene.remove(anim.group);
+      anim.dispose();
+    }
+    this.activeDeathAnimations = [];
+
+    for (const beacon of this.activeDiscoveryBeacons) {
+      this.scene.remove(beacon.group);
+      beacon.dispose();
+    }
+    this.activeDiscoveryBeacons = [];
+
+    if (this.unsubscribeKill) this.unsubscribeKill();
+    if (this.unsubscribeDiscovery) this.unsubscribeDiscovery();
+    soundEngine.stopShipHum();
 
     if (this.renderer.domElement.parentElement) {
       this.renderer.domElement.parentElement.removeChild(this.renderer.domElement);

@@ -84,7 +84,44 @@ export function createGameServer() {
     socket.on(EVENTS.VENT_MOVE, (d: { ventId: string }) => room()?.ventMove(socket.id, String(d?.ventId)));
     socket.on(EVENTS.VENT_EXIT, () => room()?.ventExit(socket.id));
     socket.on(EVENTS.CAST_VOTE, (d: { targetId: string }) => room()?.castVote(socket.id, String(d?.targetId)));
-    socket.on(EVENTS.CHAT_MESSAGE, (d: { text: string }) => room()?.chat(socket.id, String(d?.text ?? '')));
+    socket.on(EVENTS.SABOTAGE, (d: { type: string; room?: string }) => room()?.sabotage(socket.id, d));
+    socket.on(EVENTS.FIX_SABOTAGE, (d: { type: string; switchIndex?: number; pad?: string }) => room()?.fixSabotage(socket.id, d));
+    socket.on(EVENTS.CHAT_MESSAGE, (d: { text: string; scope?: any }) => {
+      const activeRoom = room();
+      if (activeRoom) {
+        activeRoom.chat(socket.id, String(d?.text ?? ''));
+      } else {
+        lobbyManager.handleChatMessage(socket, d);
+      }
+    });
+
+    // ---- WebRTC Proximity Voice Signaling ----
+    socket.on(EVENTS.RTC_SIGNAL, (data: { targetId: string; signal: any }) => {
+      if (data?.targetId && data?.signal) {
+        io.to(data.targetId).emit(EVENTS.RTC_SIGNAL, {
+          senderId: socket.id,
+          signal: data.signal,
+        });
+      }
+    });
+
+    socket.on(EVENTS.RTC_INIT_PEER, (data: { targetId: string }) => {
+      if (data?.targetId) {
+        io.to(data.targetId).emit(EVENTS.RTC_INIT_PEER, {
+          senderId: socket.id,
+        });
+      }
+    });
+
+    socket.on(EVENTS.VOICE_SPEAKING_UPDATE, (data: { isSpeaking: boolean }) => {
+      const lobby = lobbyManager.getLobbyBySocket(socket);
+      if (lobby) {
+        socket.to(lobby.code).emit(EVENTS.VOICE_SPEAKING_UPDATE, {
+          playerId: socket.id,
+          isSpeaking: !!data?.isSpeaking,
+        });
+      }
+    });
 
     socket.on('disconnect', () => {
       lobbyManager.leaveLobby(socket);

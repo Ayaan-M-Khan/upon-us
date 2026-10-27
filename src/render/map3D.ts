@@ -312,7 +312,77 @@ export class Map3D {
       }
     }
 
+    // 10. Security CCTV terminal desk with 4 monitor screens
+    const sec = getRoomCenter('Security');
+    const secDesk = new THREE.Mesh(
+      new THREE.BoxGeometry(2.4, 0.9, 1.2),
+      new THREE.MeshStandardMaterial({ color: 0x1e1b4b, roughness: 0.4, metalness: 0.5 })
+    );
+    secDesk.position.set(sec.x, 0.45, sec.z);
+    secDesk.castShadow = true;
+    propGroup.add(secDesk);
+
+    const cctvMat = new THREE.MeshBasicMaterial({ color: 0x22d3ee });
+    for (let c = 0; c < 4; c++) {
+      const screen = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.35, 0.08), cctvMat);
+      const col = c % 2;
+      const row = Math.floor(c / 2);
+      screen.position.set(sec.x - 0.35 + col * 0.7, 1.05 + row * 0.42, sec.z - 0.2);
+      propGroup.add(screen);
+    }
+
+    // 11. Electrical Breaker Box
+    const elec = getRoomCenter('Electrical');
+    const breakerBox = new THREE.Mesh(
+      new THREE.BoxGeometry(1.2, 1.6, 0.35),
+      new THREE.MeshStandardMaterial({ color: 0x422006, metalness: 0.6, roughness: 0.3 })
+    );
+    breakerBox.position.set(elec.x - 4, 1.5, elec.z);
+    breakerBox.castShadow = true;
+    propGroup.add(breakerBox);
+
+    const switchLedMat = new THREE.MeshBasicMaterial({ color: 0xeab308 });
+    const switchLed = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.2, 0.08), switchLedMat);
+    switchLed.position.set(elec.x - 4, 1.9, elec.z + 0.18);
+    propGroup.add(switchLed);
+
     this.group.add(propGroup);
+    this.buildBlastDoors();
+  }
+
+  public blastDoors: { id: string; room: 'Cafeteria' | 'Storage'; mesh: THREE.Mesh; targetY: number }[] = [];
+
+  private buildBlastDoors(): void {
+    const doorMat = new THREE.MeshStandardMaterial({
+      color: 0xd97706,
+      metalness: 0.8,
+      roughness: 0.2,
+      emissive: 0x78350f,
+      emissiveIntensity: 0.4,
+    });
+
+    const doorSpecs: { id: string; room: 'Cafeteria' | 'Storage'; x: number; z: number; w: number; d: number }[] = [
+      { id: 'caf_west', room: 'Cafeteria', x: -12, z: -25, w: 0.5, d: 4.2 },
+      { id: 'caf_south', room: 'Cafeteria', x: 0, z: -14, w: 4.2, d: 0.5 },
+      { id: 'caf_east', room: 'Cafeteria', x: 12, z: -26, w: 0.5, d: 4.2 },
+      { id: 'storage_north', room: 'Storage', x: 0, z: 14, w: 4.2, d: 0.5 },
+      { id: 'storage_west', room: 'Storage', x: -10, z: 18, w: 0.5, d: 4.2 },
+      { id: 'storage_east', room: 'Storage', x: 8, z: 28, w: 0.5, d: 4.2 },
+    ];
+
+    for (const spec of doorSpecs) {
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(spec.w, 2.7, spec.d), doorMat);
+      mesh.position.set(spec.x, 4.2, spec.z); // Start retracted in ceiling
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      this.group.add(mesh);
+      this.blastDoors.push({
+        id: spec.id,
+        room: spec.room,
+        mesh,
+        targetY: 4.2,
+      });
+    }
   }
 
   private buildOuterSpace(): void {
@@ -344,9 +414,22 @@ export class Map3D {
     this.group.add(this.starParticles);
   }
 
-  public update(delta: number): void {
+  public update(delta: number, lockedDoors: ('Cafeteria' | 'Storage')[] = [], lightsSabotaged: boolean = false): void {
     if (this.starParticles) {
       this.starParticles.rotation.y += delta * 0.005;
+    }
+
+    // Animate blast doors
+    for (const door of this.blastDoors) {
+      const isLocked = lockedDoors.includes(door.room);
+      door.targetY = isLocked ? 1.35 : 4.2;
+      door.mesh.position.y = THREE.MathUtils.damp(door.mesh.position.y, door.targetY, 12, delta);
+    }
+
+    // Room lights dimming during lights sabotage
+    const targetIntensity = lightsSabotaged ? 0.08 : 0.7;
+    for (const light of this.roomLights) {
+      light.intensity = THREE.MathUtils.damp(light.intensity, targetIntensity, 8, delta);
     }
   }
 }

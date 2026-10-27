@@ -10,6 +10,11 @@ export const MIN_PLAYERS_TO_START = 4;
 export const MAX_PLAYERS_PER_LOBBY = 10;
 export const RECONNECT_GRACE_PERIOD_MS = 60000;
 
+// Chat constants
+export const PROXIMITY_CHAT_RADIUS_GAME = 14; // in-game world units
+export const PROXIMITY_CHAT_RADIUS_LOBBY = 8; // dropship lobby units
+export const MAX_CHAT_MESSAGE_LENGTH = 160;
+
 export interface PlayerColor {
   id: string;
   name: string;
@@ -48,8 +53,11 @@ export const PLAYER_HATS: PlayerHat[] = [
 
 export type KillDistance = 'Short' | 'Medium' | 'Long';
 export type TaskBarUpdateMode = 'Always' | 'Meetings' | 'Never';
+export type BotDifficulty = 'Easy' | 'Normal' | 'Hard';
 
 export interface GameSettings {
+  maxPlayers?: number; // 4-10 (10 default)
+  botDifficulty?: BotDifficulty; // 'Normal' default
   impostorCount: number; // 1-3
   playerSpeed: number; // 0.5x - 3x (1.0 default)
   crewmateVision: number; // 0.25x - 5x (1.0 default)
@@ -72,6 +80,8 @@ export interface GameSettings {
 }
 
 export const DEFAULT_GAME_SETTINGS: GameSettings = {
+  maxPlayers: 10,
+  botDifficulty: 'Normal',
   impostorCount: 1,
   playerSpeed: 1.0,
   crewmateVision: 1.0,
@@ -104,7 +114,7 @@ export const MEETING_INTRO_MS = 2500;
 export const MEETING_RESULTS_MS = 5000;
 export const MEETING_EJECTION_MS = 6000;
 export const ROLE_REVEAL_MS = 5000;
-export const GAME_OVER_MS = 9000;
+export const GAME_OVER_MS = 16000;
 export const MAX_CHAT_LENGTH = 100;
 
 export const BOT_NAMES = ['Beep', 'Boop', 'Nova', 'Orbit', 'Comet', 'Pixel', 'Zap', 'Echo', 'Luna', 'Sparky'];

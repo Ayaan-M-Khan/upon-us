@@ -10,13 +10,21 @@ import {
   GAME_STATES,
   JOIN_CODE_ALPHABET,
   JOIN_CODE_LENGTH,
+  MAX_CHAT_MESSAGE_LENGTH,
   MAX_PLAYERS_PER_LOBBY,
   MIN_PLAYERS_TO_START,
   PLAYER_COLORS,
   PLAYER_HATS,
+  PROXIMITY_CHAT_RADIUS_LOBBY,
   sanitizePlayerName,
 } from '../shared/constants';
-import { EVENTS, LobbyData, LobbyPlayer } from '../shared/events';
+import {
+  ChatBroadcastMessage,
+  ChatScope,
+  EVENTS,
+  LobbyData,
+  LobbyPlayer,
+} from '../shared/events';
 import { GameRoom } from './game/GameRoom';
 
 export class Lobby {
@@ -141,8 +149,9 @@ export class LobbyManager {
       return;
     }
 
-    if (lobby.players.size >= MAX_PLAYERS_PER_LOBBY) {
-      socket.emit(EVENTS.LOBBY_ERROR, { message: 'Lobby is full (10/10 players).' });
+    const maxAllowed = lobby.settings.maxPlayers || MAX_PLAYERS_PER_LOBBY;
+    if (lobby.players.size >= maxAllowed) {
+      socket.emit(EVENTS.LOBBY_ERROR, { message: `Lobby is full (${lobby.players.size}/${maxAllowed} players).` });
       return;
     }
 
@@ -219,11 +228,20 @@ export class LobbyManager {
 
     // Validate settings values
     const s = { ...lobby.settings, ...partialSettings };
+    s.maxPlayers = Math.max(4, Math.min(10, Math.round(s.maxPlayers || 10)));
+    s.botDifficulty = (['Easy', 'Normal', 'Hard'].includes(String(s.botDifficulty)) ? s.botDifficulty : 'Normal') as any;
     s.impostorCount = Math.max(1, Math.min(3, Math.round(s.impostorCount || 1)));
+    // Impostors cannot exceed half the max player count
+    if (s.maxPlayers < 7 && s.impostorCount > 2) s.impostorCount = 2;
+    if (s.maxPlayers < 4 && s.impostorCount > 1) s.impostorCount = 1;
+
     s.playerSpeed = Math.max(0.5, Math.min(3.0, Number(s.playerSpeed) || 1.0));
     s.crewmateVision = Math.max(0.25, Math.min(5.0, Number(s.crewmateVision) || 1.0));
     s.impostorVision = Math.max(0.25, Math.min(5.0, Number(s.impostorVision) || 1.5));
     s.killCooldown = Math.max(10, Math.min(60, Number(s.killCooldown) || 25));
+    if (['Short', 'Medium', 'Long'].includes(String(s.killDistance))) {
+      s.killDistance = s.killDistance as any;
+    }
     s.commonTasks = Math.max(0, Math.min(2, Math.round(s.commonTasks || 1)));
     s.shortTasks = Math.max(0, Math.min(5, Math.round(s.shortTasks || 2)));
     s.longTasks = Math.max(0, Math.min(3, Math.round(s.longTasks || 1)));
@@ -232,6 +250,9 @@ export class LobbyManager {
     s.discussionTime = Math.max(0, Math.min(120, Math.round(s.discussionTime || 15)));
     s.votingTime = Math.max(15, Math.min(300, Math.round(s.votingTime || 120)));
     s.fillWithBots = s.fillWithBots !== false;
+    s.confirmEjects = !!s.confirmEjects;
+    s.anonymousVotes = !!s.anonymousVotes;
+    s.visualTasks = s.visualTasks !== false;
 
     lobby.settings = s;
     this.broadcastLobbyState(lobby);
@@ -324,10 +345,75 @@ export class LobbyManager {
     this.gameRooms.set(lobby.code, gameRoom);
 
     // Notify clients that match has started
-    this.io.to(lobby.code).emit(EVENTS.GAME_STARTED, {
-      map: lobby.settings.map,
-      settings: lobby.settings,
-    });
+    for (const [playerId, player] of gameRoom.players) {
+      if (!player.isBot) {
+        const socket = this.io.sockets.sockets.get(playerId);
+        if (socket) {
+          socket.emit(EVENTS.GAME_STARTED, {
+            map: lobby.settings.map,
+            settings: lobby.settings,
+          });
+        }
+      }
+    }
+  }
+
+  public handleChatMessage(
+    socket: Socket,
+    data: { text: string; scope?: ChatScope }
+  ): void {
+    const code = this.socketToLobby.get(socket.id);
+    if (!code) return;
+
+    const lobby = this.lobbies.get(code);
+    if (!lobby) return;
+
+    // If game is actively playing, delegate to GameRoom
+    const gameRoom = this.gameRooms.get(code);
+    if (lobby.state === GAME_STATES.PLAYING && gameRoom) {
+      gameRoom.chat(socket.id, data?.text || '');
+      return;
+    }
+
+    // Lobby Chat
+    const player = lobby.players.get(socket.id);
+    if (!player) return;
+
+    const rawText = (data?.text || '').trim().slice(0, MAX_CHAT_MESSAGE_LENGTH);
+    if (!rawText) return;
+
+    const scope: ChatScope = data?.scope === 'proximity' ? 'proximity' : 'team';
+    const messageId = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+
+    const baseMessage: ChatBroadcastMessage = {
+      id: messageId,
+      senderId: socket.id,
+      senderName: player.name,
+      senderColorId: player.colorId,
+      senderHatId: player.hatId,
+      text: rawText,
+      scope,
+      timestamp: Date.now(),
+      senderRoom: 'Dropship',
+      senderX: player.x,
+      senderZ: player.z,
+    };
+
+    if (scope === 'proximity') {
+      // Proximity distance check in Dropship
+      for (const [id, targetPlayer] of lobby.players) {
+        const dist = Math.hypot(targetPlayer.x - player.x, targetPlayer.z - player.z);
+        if (id === socket.id || dist <= PROXIMITY_CHAT_RADIUS_LOBBY) {
+          this.io.to(id).emit(EVENTS.CHAT_BROADCAST, {
+            ...baseMessage,
+            distance: Math.round(dist * 10) / 10,
+          });
+        }
+      }
+    } else {
+      // Whole Lobby broadcast
+      this.io.to(lobby.code).emit(EVENTS.CHAT_BROADCAST, baseMessage);
+    }
   }
 
   /** Called by a GameRoom when the post-game screen is over: everyone goes back to the waiting room. */

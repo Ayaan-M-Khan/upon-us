@@ -31,6 +31,8 @@ import { LobbyData, LobbyPlayer } from '../../shared/events';
 import { net } from '../net';
 import { soundEngine } from '../audio';
 import { DropshipLobbyScene } from '../render/dropshipLobby';
+import { ChatOverlay } from './chatOverlay';
+import { LobbySettingsUI } from './lobbySettingsUI';
 
 interface LobbyProps {
   onLeave: () => void;
@@ -208,7 +210,7 @@ export const LobbyView: React.FC<LobbyProps> = ({ onLeave }) => {
           <div className="flex items-center space-x-2 bg-slate-900/90 backdrop-blur-md px-4 py-2.5 rounded-2xl border-2 border-slate-700/80 shadow-2xl">
             <Users className="w-4 h-4 text-cyan-400" />
             <span className="text-sm font-black text-slate-200">
-              {lobby?.players.length || 1}/{MAX_PLAYERS_PER_LOBBY}
+              {lobby?.players.length || 1}/{lobby?.settings.maxPlayers || MAX_PLAYERS_PER_LOBBY}
             </span>
           </div>
 
@@ -410,265 +412,13 @@ export const LobbyView: React.FC<LobbyProps> = ({ onLeave }) => {
           )}
 
           {/* TAB 3: GAME SETTINGS */}
-          {activeTab === 'settings' && (
-            <div className="p-4 space-y-4 max-h-[38vh] overflow-y-auto text-xs">
-              {!isHost && (
-                <div className="p-2.5 bg-cyan-950/60 border border-cyan-700/60 rounded-xl text-cyan-300 font-semibold flex items-center space-x-2">
-                  <Info className="w-4 h-4 shrink-0" />
-                  <span>Viewing host game settings. These settings sync live when the host modifies them.</span>
-                </div>
-              )}
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {/* Impostor Count */}
-                <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800 space-y-1.5">
-                  <div className="flex justify-between font-bold text-slate-300">
-                    <span># OF IMPOSTORS</span>
-                    <span className="text-red-400 font-black">{lobby?.settings.impostorCount}</span>
-                  </div>
-                  {isHost ? (
-                    <div className="flex space-x-2">
-                      {[1, 2, 3].map((num) => (
-                        <button
-                          key={num}
-                          onClick={() => handleUpdateSetting('impostorCount', num)}
-                          className={`flex-1 py-1.5 rounded-lg font-bold transition-all cursor-pointer ${
-                            lobby?.settings.impostorCount === num
-                              ? 'bg-red-600 text-white'
-                              : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
-                          }`}
-                        >
-                          {num}
-                        </button>
-                      ))}
-                    </div>
-                  ) : null}
-                </div>
-
-                {/* Player Speed */}
-                <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800 space-y-1.5">
-                  <div className="flex justify-between font-bold text-slate-300">
-                    <span>PLAYER SPEED</span>
-                    <span className="text-cyan-400 font-black">{lobby?.settings.playerSpeed}x</span>
-                  </div>
-                  {isHost ? (
-                    <input
-                      type="range"
-                      min="0.5"
-                      max="3.0"
-                      step="0.25"
-                      value={lobby?.settings.playerSpeed || 1.0}
-                      onChange={(e) => handleUpdateSetting('playerSpeed', parseFloat(e.target.value))}
-                      className="w-full accent-cyan-400"
-                    />
-                  ) : null}
-                </div>
-
-                {/* Kill Cooldown */}
-                <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800 space-y-1.5">
-                  <div className="flex justify-between font-bold text-slate-300">
-                    <span>KILL COOLDOWN</span>
-                    <span className="text-yellow-400 font-black">{lobby?.settings.killCooldown}s</span>
-                  </div>
-                  {isHost ? (
-                    <input
-                      type="range"
-                      min="10"
-                      max="60"
-                      step="2.5"
-                      value={lobby?.settings.killCooldown || 25}
-                      onChange={(e) => handleUpdateSetting('killCooldown', parseFloat(e.target.value))}
-                      className="w-full accent-yellow-400"
-                    />
-                  ) : null}
-                </div>
-
-                {/* Kill Distance */}
-                <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800 space-y-1.5">
-                  <div className="flex justify-between font-bold text-slate-300">
-                    <span>KILL DISTANCE</span>
-                    <span className="text-purple-400 font-black">{lobby?.settings.killDistance}</span>
-                  </div>
-                  {isHost ? (
-                    <div className="flex space-x-2">
-                      {(['Short', 'Medium', 'Long'] as const).map((dist) => (
-                        <button
-                          key={dist}
-                          onClick={() => handleUpdateSetting('killDistance', dist)}
-                          className={`flex-1 py-1.5 rounded-lg font-bold transition-all cursor-pointer ${
-                            lobby?.settings.killDistance === dist
-                              ? 'bg-purple-600 text-white'
-                              : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
-                          }`}
-                        >
-                          {dist}
-                        </button>
-                      ))}
-                    </div>
-                  ) : null}
-                </div>
-
-                {/* Vision Sliders */}
-                <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800 space-y-1.5">
-                  <div className="flex justify-between font-bold text-slate-300">
-                    <span>CREWMATE VISION</span>
-                    <span className="text-blue-400 font-black">{lobby?.settings.crewmateVision}x</span>
-                  </div>
-                  {isHost ? (
-                    <input
-                      type="range"
-                      min="0.25"
-                      max="3.0"
-                      step="0.25"
-                      value={lobby?.settings.crewmateVision || 1.0}
-                      onChange={(e) => handleUpdateSetting('crewmateVision', parseFloat(e.target.value))}
-                      className="w-full accent-blue-400"
-                    />
-                  ) : null}
-                </div>
-
-                <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800 space-y-1.5">
-                  <div className="flex justify-between font-bold text-slate-300">
-                    <span>IMPOSTOR VISION</span>
-                    <span className="text-red-400 font-black">{lobby?.settings.impostorVision}x</span>
-                  </div>
-                  {isHost ? (
-                    <input
-                      type="range"
-                      min="0.25"
-                      max="3.0"
-                      step="0.25"
-                      value={lobby?.settings.impostorVision || 1.5}
-                      onChange={(e) => handleUpdateSetting('impostorVision', parseFloat(e.target.value))}
-                      className="w-full accent-red-400"
-                    />
-                  ) : null}
-                </div>
-
-                {/* Tasks Configuration */}
-                <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800 space-y-1.5">
-                  <div className="flex justify-between font-bold text-slate-300">
-                    <span>COMMON TASKS</span>
-                    <span className="text-emerald-400 font-black">{lobby?.settings.commonTasks}</span>
-                  </div>
-                  {isHost ? (
-                    <input
-                      type="range"
-                      min="0"
-                      max="2"
-                      step="1"
-                      value={lobby?.settings.commonTasks || 1}
-                      onChange={(e) => handleUpdateSetting('commonTasks', parseInt(e.target.value))}
-                      className="w-full accent-emerald-400"
-                    />
-                  ) : null}
-                </div>
-
-                <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800 space-y-1.5">
-                  <div className="flex justify-between font-bold text-slate-300">
-                    <span>SHORT TASKS</span>
-                    <span className="text-emerald-400 font-black">{lobby?.settings.shortTasks}</span>
-                  </div>
-                  {isHost ? (
-                    <input
-                      type="range"
-                      min="0"
-                      max="5"
-                      step="1"
-                      value={lobby?.settings.shortTasks || 2}
-                      onChange={(e) => handleUpdateSetting('shortTasks', parseInt(e.target.value))}
-                      className="w-full accent-emerald-400"
-                    />
-                  ) : null}
-                </div>
-
-                {/* Voting & Discussion Times */}
-                <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800 space-y-1.5">
-                  <div className="flex justify-between font-bold text-slate-300">
-                    <span>DISCUSSION TIME</span>
-                    <span className="text-amber-400 font-black">{lobby?.settings.discussionTime}s</span>
-                  </div>
-                  {isHost ? (
-                    <input
-                      type="range"
-                      min="0"
-                      max="120"
-                      step="15"
-                      value={lobby?.settings.discussionTime || 15}
-                      onChange={(e) => handleUpdateSetting('discussionTime', parseInt(e.target.value))}
-                      className="w-full accent-amber-400"
-                    />
-                  ) : null}
-                </div>
-
-                <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800 space-y-1.5">
-                  <div className="flex justify-between font-bold text-slate-300">
-                    <span>VOTING TIME</span>
-                    <span className="text-amber-400 font-black">{lobby?.settings.votingTime}s</span>
-                  </div>
-                  {isHost ? (
-                    <input
-                      type="range"
-                      min="15"
-                      max="300"
-                      step="15"
-                      value={lobby?.settings.votingTime || 120}
-                      onChange={(e) => handleUpdateSetting('votingTime', parseInt(e.target.value))}
-                      className="w-full accent-amber-400"
-                    />
-                  ) : null}
-                </div>
-
-                <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800 flex items-center justify-between font-bold text-slate-300">
-                  <span>FILL EMPTY SEATS WITH BOTS</span>
-                  {isHost ? (
-                    <button
-                      onClick={() => handleUpdateSetting('fillWithBots', !botFill)}
-                      className={`px-3 py-1 rounded-lg font-bold transition-all cursor-pointer ${
-                        botFill ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-400'
-                      }`}
-                    >
-                      {botFill ? 'ON' : 'OFF'}
-                    </button>
-                  ) : (
-                    <span>{botFill ? 'ON' : 'OFF'}</span>
-                  )}
-                </div>
-
-                {/* Confirm Ejects & Visual Tasks Toggles */}
-                <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800 flex items-center justify-between font-bold text-slate-300">
-                  <span>CONFIRM EJECTS</span>
-                  {isHost ? (
-                    <button
-                      onClick={() => handleUpdateSetting('confirmEjects', !lobby?.settings.confirmEjects)}
-                      className={`px-3 py-1 rounded-lg font-bold transition-all cursor-pointer ${
-                        lobby?.settings.confirmEjects ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-400'
-                      }`}
-                    >
-                      {lobby?.settings.confirmEjects ? 'ON' : 'OFF'}
-                    </button>
-                  ) : (
-                    <span>{lobby?.settings.confirmEjects ? 'ON' : 'OFF'}</span>
-                  )}
-                </div>
-
-                <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800 flex items-center justify-between font-bold text-slate-300">
-                  <span>VISUAL TASKS</span>
-                  {isHost ? (
-                    <button
-                      onClick={() => handleUpdateSetting('visualTasks', !lobby?.settings.visualTasks)}
-                      className={`px-3 py-1 rounded-lg font-bold transition-all cursor-pointer ${
-                        lobby?.settings.visualTasks ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-400'
-                      }`}
-                    >
-                      {lobby?.settings.visualTasks ? 'ON' : 'OFF'}
-                    </button>
-                  ) : (
-                    <span>{lobby?.settings.visualTasks ? 'ON' : 'OFF'}</span>
-                  )}
-                </div>
-              </div>
-            </div>
+          {activeTab === 'settings' && lobby && (
+            <LobbySettingsUI
+              settings={lobby.settings}
+              isHost={isHost}
+              onUpdateSetting={handleUpdateSetting}
+              currentPlayersCount={lobby.players.length}
+            />
           )}
 
           {/* Bottom Action Footer (Start Game buttons) */}
@@ -721,6 +471,17 @@ export const LobbyView: React.FC<LobbyProps> = ({ onLeave }) => {
           </div>
         </div>
       </div>
+
+      {/* Real-time Lobby Chat Overlay */}
+      <ChatOverlay
+        currentRoom="Dropship"
+        isGameMatch={false}
+        players={lobby?.players || []}
+        localPlayerId={socketId}
+        onDisplayChatBubble={(playerId, text, scope) => {
+          sceneRef.current?.displayChatBubble(playerId, text, scope);
+        }}
+      />
     </div>
   );
 };

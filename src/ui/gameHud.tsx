@@ -20,12 +20,14 @@ import {
   ChevronUp,
 } from 'lucide-react';
 import { GAME_STATES } from '../../shared/constants';
-import { GameStateSnapshot } from '../../shared/events';
+import { BodyDiscoveredPayload, GameStateSnapshot } from '../../shared/events';
 import { MAP_BOUNDS, MAP_CORRIDORS, MAP_ROOMS_DETAIL, MAP_VENTS } from '../../shared/mapData';
 import { soundEngine } from '../audio';
 import { net } from '../net';
 import { CameraViewMode } from '../render/cameraController';
 import { InteractionContext } from '../render/gameScene';
+import { GlobalTaskBar } from './globalTaskBar';
+import { ReportBodyPrompt } from './reportBodyPrompt';
 import type { WorkState } from './gameView';
 
 interface GameHudProps {
@@ -45,6 +47,9 @@ interface GameHudProps {
   onCancelWork: () => void;
   onJoystick: (x: number, y: number) => void;
   onCameraSettings?: (sensitivityPct: number, headBob: boolean) => void;
+  onOpenSabotage?: () => void;
+  discoveredBodyAlert?: BodyDiscoveredPayload | null;
+  onDismissDiscovery?: () => void;
 }
 
 /** Round Among-Us-style action button. */
@@ -60,7 +65,7 @@ const ActionButton: React.FC<{
 }> = ({ label, hint, enabled, onClick, tone, icon, badge, title }) => {
   const tones: Record<string, string> = {
     use: 'from-cyan-500 to-blue-600 border-cyan-300 shadow-[0_8px_20px_rgba(6,182,212,0.4)]',
-    report: 'from-amber-400 to-orange-500 border-amber-200 shadow-[0_8px_20px_rgba(245,158,11,0.4)]',
+    report: 'from-red-500 via-rose-600 to-amber-500 border-red-200 shadow-[0_8px_25px_rgba(239,68,68,0.7)] animate-pulse ring-4 ring-red-400/60',
     kill: 'from-red-500 to-red-700 border-red-300 shadow-[0_8px_20px_rgba(239,68,68,0.45)]',
     vent: 'from-slate-500 to-slate-700 border-slate-300 shadow-[0_8px_20px_rgba(100,116,139,0.4)]',
     sabotage: 'from-rose-600 to-red-900 border-rose-300 shadow-[0_8px_20px_rgba(190,18,60,0.4)]',
@@ -168,6 +173,9 @@ export const GameHud: React.FC<GameHudProps> = ({
   onCancelWork,
   onJoystick,
   onCameraSettings,
+  onOpenSabotage,
+  discoveredBodyAlert,
+  onDismissDiscovery,
 }) => {
   const [showMap, setShowMap] = useState(false);
   const [showTasks, setShowTasks] = useState(true);
@@ -188,6 +196,23 @@ export const GameHud: React.FC<GameHudProps> = ({
   const coarse = typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches;
   const [showSettings, setShowSettings] = useState(false);
 
+  // Sabotage state
+  const sabCdMs = you?.sabotageCooldownMs || 0;
+  const sabCdSec = Math.ceil(sabCdMs / 1000);
+  const sabReady = isImpostor && sabCdMs <= 0;
+  const isCriticalSabotage = snapshot?.sabotage?.type === 'reactor' || snapshot?.sabotage?.type === 'o2';
+
+  // Critical sabotage audio siren
+  useEffect(() => {
+    if (isCriticalSabotage) {
+      soundEngine.playAlarmSiren();
+      const id = setInterval(() => {
+        soundEngine.playAlarmSiren();
+      }, 4000);
+      return () => clearInterval(id);
+    }
+  }, [isCriticalSabotage]);
+
   // Settings
   const [sensitivity, setSensitivity] = useState(50);
   const [headBob, setHeadBob] = useState(true);
@@ -205,6 +230,10 @@ export const GameHud: React.FC<GameHudProps> = ({
         soundEngine.playClick();
         setShowMap((prev) => !prev);
       }
+      if (e.code === 'KeyG' && isImpostor && sabReady) {
+        e.preventDefault();
+        onOpenSabotage?.();
+      }
       if (e.code === 'Escape') {
         setShowMap(false);
         setShowSettings(false);
@@ -213,7 +242,7 @@ export const GameHud: React.FC<GameHudProps> = ({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [isImpostor, sabReady, onOpenSabotage]);
 
   const workPct = work ? Math.min(100, ((now - work.startedAt) / (work.hold * 1000)) * 100) : 0;
   const myTasks = you?.tasks || [];
@@ -221,16 +250,58 @@ export const GameHud: React.FC<GameHudProps> = ({
 
   return (
     <div className="absolute inset-0 pointer-events-none select-none z-20 flex flex-col justify-between p-4">
+      {/* CRITICAL SABOTAGE ALERT BANNER */}
+      {isCriticalSabotage && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 pointer-events-auto z-30">
+          <div className="flex items-center space-x-2.5 bg-red-600/95 border-2 border-red-300 text-white font-black px-5 py-2.5 rounded-2xl animate-pulse shadow-[0_0_25px_rgba(239,68,68,0.7)] text-sm tracking-wider">
+            <AlertTriangle className="w-5 h-5 animate-bounce" />
+            <span>
+              CRITICAL: {snapshot!.sabotage!.type === 'reactor' ? 'REACTOR MELTDOWN' : 'O2 DEPLETION'} IN {snapshot!.sabotage!.countdown}s!
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Body Discovery Tactical Alert Banner */}
+      {discoveredBodyAlert && (
+        <div className="absolute top-16 left-1/2 -translate-x-1/2 pointer-events-auto z-40 animate-in fade-in slide-in-from-top duration-300">
+          <div className="flex items-center space-x-3 bg-gradient-to-r from-red-950/95 via-rose-900/95 to-red-950/95 border-2 border-red-400/90 text-white font-black px-5 py-3 rounded-2xl shadow-[0_0_35px_rgba(225,29,72,0.85)] tracking-wide backdrop-blur-md">
+            <div className="relative flex items-center justify-center w-9 h-9 rounded-xl bg-red-600/80 border border-red-300 animate-pulse shrink-0">
+              <Skull className="w-5 h-5 text-white" />
+              <div className="absolute -top-1 -right-1 w-3 h-3 bg-amber-400 rounded-full animate-ping" />
+            </div>
+            <div className="flex flex-col">
+              <div className="flex items-center space-x-2">
+                <span className="text-xs uppercase tracking-widest text-red-300 font-extrabold flex items-center gap-1">
+                  <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
+                  Corpse Sighted
+                </span>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-800/80 border border-red-400/60 text-white font-bold">
+                  {discoveredBodyAlert.room || 'Ship'}
+                </span>
+              </div>
+              <div className="text-sm font-black text-slate-100">
+                <span className="text-amber-300">{discoveredBodyAlert.discovererName}</span> discovered a{' '}
+                <span className="capitalize text-red-200">{discoveredBodyAlert.victimColorId}</span> body!
+              </div>
+            </div>
+            {onDismissDiscovery && (
+              <button
+                onClick={onDismissDiscovery}
+                className="ml-2 p-1.5 rounded-lg bg-red-900/60 hover:bg-red-800 text-red-200 hover:text-white transition-colors cursor-pointer"
+                title="Dismiss Alert"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+        </div>
+      )}
       {/* TOP BAR */}
       <div className="w-full flex items-start justify-between">
-        {/* Left: task progress bar + task list (like the original) */}
-        <div className="pointer-events-auto w-60 sm:w-72">
-          <div className="relative h-6 rounded-md bg-slate-900/85 border-2 border-slate-600 overflow-hidden">
-            <div className="h-full bg-gradient-to-r from-green-500 to-emerald-400 transition-all duration-500" style={{ width: `${progress}%` }} />
-            <div className="absolute inset-0 flex items-center justify-center text-[11px] font-black tracking-widest text-white drop-shadow">
-              TOTAL TASKS COMPLETED
-            </div>
-          </div>
+        {/* Left: Global Task Completion Bar + task list */}
+        <div className="pointer-events-auto w-64 sm:w-80">
+          <GlobalTaskBar snapshot={snapshot} isImpostor={!!isImpostor} />
           <div className="mt-1.5 rounded-xl bg-slate-900/80 border border-slate-700 backdrop-blur-md overflow-hidden">
             <button
               onClick={() => setShowTasks((v) => !v)}
@@ -359,6 +430,17 @@ export const GameHud: React.FC<GameHudProps> = ({
         </div>
       )}
 
+      {/* DEAD BODY REPORT PROXIMITY PROMPT */}
+      <ReportBodyPrompt
+        reportBodyId={ctx.reportBodyId}
+        snapshot={snapshot}
+        playerPos={playerPos}
+        onReport={onReport}
+        alive={alive}
+        playing={!!playing}
+        inVent={inVent}
+      />
+
       {/* BOTTOM */}
       <div className="w-full flex items-end justify-between">
         <div className="flex flex-col items-start space-y-2">
@@ -368,7 +450,7 @@ export const GameHud: React.FC<GameHudProps> = ({
             <div><strong className="text-cyan-300">Mouse Drag:</strong> Orbit Camera</div>
             <div><strong className="text-cyan-300">E / Space:</strong> Use • <strong className="text-cyan-300">R:</strong> Report</div>
             {isImpostor && <div><strong className="text-red-300">Q:</strong> Kill • <strong className="text-red-300">F:</strong> Vent</div>}
-            <div><strong className="text-cyan-300">V:</strong> 1st/3rd Person • <strong className="text-cyan-300">Tab / M:</strong> Map</div>
+            <div><strong className="text-emerald-400">V (Hold):</strong> Push-to-Talk • <strong className="text-cyan-300">Tab / M:</strong> Map</div>
           </div>
         </div>
 
@@ -379,9 +461,11 @@ export const GameHud: React.FC<GameHudProps> = ({
               <ActionButton
                 tone="sabotage"
                 label="SABOTAGE"
-                enabled={false}
-                title="Sabotages are not implemented yet"
-                onClick={() => {}}
+                hint="[G]"
+                enabled={!!playing && alive && !inVent && sabReady}
+                badge={!sabReady && sabCdSec > 0 ? String(sabCdSec) : undefined}
+                title="Open Tactical Sabotage Map"
+                onClick={() => onOpenSabotage?.()}
                 icon={<AlertTriangle className="w-7 h-7 mb-0.5" />}
               />
             )}
@@ -418,9 +502,34 @@ export const GameHud: React.FC<GameHudProps> = ({
             )}
             <ActionButton
               tone="use"
-              label={ctx.emergency ? 'EMERGENCY' : 'USE'}
+              label={
+                ctx.emergency
+                  ? 'EMERGENCY'
+                  : ctx.breakerPanel
+                  ? 'BREAKER'
+                  : ctx.reactorHandpad
+                  ? 'HANDPAD'
+                  : ctx.o2Keypad
+                  ? 'O2 PANEL'
+                  : ctx.adminConsole
+                  ? 'ADMIN MAP'
+                  : ctx.securityConsole
+                  ? 'SECURITY'
+                  : 'USE'
+              }
               hint="[E]"
-              enabled={!!playing && !inVent && !work && (ctx.emergency || !!ctx.taskId)}
+              enabled={
+                !!playing &&
+                !inVent &&
+                !work &&
+                (ctx.emergency ||
+                  !!ctx.taskId ||
+                  ctx.breakerPanel ||
+                  !!ctx.reactorHandpad ||
+                  !!ctx.o2Keypad ||
+                  ctx.adminConsole ||
+                  ctx.securityConsole)
+              }
               onClick={onUse}
               icon={<Hand className="w-7 h-7 mb-0.5" />}
             />
@@ -501,6 +610,15 @@ export const GameHud: React.FC<GameHudProps> = ({
                       <text x={t.x} y={t.z} textAnchor="middle" dominantBaseline="central" fontSize="1.6" fontWeight="bold" fill="#422006">!</text>
                     </g>
                   ))}
+
+                {/* Dead bodies on schematic map */}
+                {(snapshot?.bodies || []).map((b) => (
+                  <g key={`map_body_${b.id}`}>
+                    <circle cx={b.x} cy={b.z} r="2.4" fill="#ef4444" opacity="0.35" />
+                    <circle cx={b.x} cy={b.z} r="1.4" fill="#991b1b" stroke="#fca5a5" strokeWidth="0.4" />
+                    <text x={b.x} y={b.z} textAnchor="middle" dominantBaseline="central" fontSize="1.3" fontWeight="bold" fill="#ffffff">☠</text>
+                  </g>
+                ))}
 
                 {/* You */}
                 <circle cx={playerPos.x} cy={playerPos.z} r="1.5" fill="#ffffff" stroke="#0ea5e9" strokeWidth="0.6" />

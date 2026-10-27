@@ -5,7 +5,17 @@
 
 import { io, Socket } from 'socket.io-client';
 import { GameSettings } from '../shared/constants';
-import { ChatMessage, EVENTS, GameOverInfo, GameStateSnapshot, LobbyData } from '../shared/events';
+import {
+  BodyDiscoveredPayload,
+  ChatBroadcastMessage,
+  ChatMessage,
+  ChatScope,
+  EVENTS,
+  GameOverInfo,
+  GameStateSnapshot,
+  LobbyData,
+  PlayerKilledPayload,
+} from '../shared/events';
 
 type LobbyStateListener = (state: LobbyData | null) => void;
 type ErrorListener = (message: string) => void;
@@ -23,8 +33,15 @@ class NetworkManager {
   private gameStartedListeners: Set<GameStartedListener> = new Set();
   private snapshotListeners: Set<StateSnapshotListener> = new Set();
   private chatListeners: Set<(m: ChatMessage) => void> = new Set();
+  private chatBroadcastListeners: Set<(m: ChatBroadcastMessage) => void> = new Set();
   private gameOverListeners: Set<(g: GameOverInfo) => void> = new Set();
+  private playerKilledListeners: Set<(p: PlayerKilledPayload) => void> = new Set();
+  private bodyDiscoveredListeners: Set<(p: BodyDiscoveredPayload) => void> = new Set();
+  private rtcSignalListeners: Set<(data: { senderId: string; signal: any }) => void> = new Set();
+  private rtcInitPeerListeners: Set<(data: { senderId: string }) => void> = new Set();
+  private voiceSpeakingListeners: Set<(data: { playerId: string; isSpeaking: boolean }) => void> = new Set();
   private currentLobby: LobbyData | null = null;
+  private myRole: string = 'crewmate';
 
   public init(): void {
     if (this.socket) return;
@@ -58,6 +75,9 @@ class NetworkManager {
     });
 
     this.socket.on(EVENTS.STATE_SNAPSHOT, (data: GameStateSnapshot) => {
+      if (data.you?.role) {
+        this.myRole = data.you.role;
+      }
       this.snapshotListeners.forEach((cb) => cb(data));
     });
 
@@ -68,8 +88,43 @@ class NetworkManager {
       }
     );
 
-    this.socket.on(EVENTS.CHAT_BROADCAST, (m: ChatMessage) => this.chatListeners.forEach((cb) => cb(m)));
+    this.socket.on(EVENTS.CHAT_BROADCAST, (raw: any) => {
+      const chatMsg: ChatMessage = {
+        id: raw.id || `c_${Date.now()}`,
+        senderId: raw.senderId || '',
+        name: raw.name || raw.senderName || 'Crewmate',
+        colorId: raw.colorId || raw.senderColorId || 'red',
+        text: raw.text || '',
+        ghost: !!raw.ghost,
+      };
+      const broadcastMsg: ChatBroadcastMessage = {
+        id: raw.id || `c_${Date.now()}`,
+        senderId: raw.senderId || '',
+        senderName: raw.senderName || raw.name || 'Crewmate',
+        senderColorId: raw.senderColorId || raw.colorId || 'red',
+        senderHatId: raw.senderHatId || 'none',
+        text: raw.text || '',
+        scope: raw.scope || 'team',
+        timestamp: raw.timestamp || Date.now(),
+        distance: raw.distance,
+        senderRoom: raw.senderRoom,
+      };
+      this.chatListeners.forEach((cb) => cb(chatMsg));
+      this.chatBroadcastListeners.forEach((cb) => cb(broadcastMsg));
+    });
     this.socket.on(EVENTS.GAME_OVER, (g: GameOverInfo) => this.gameOverListeners.forEach((cb) => cb(g)));
+    this.socket.on(EVENTS.PLAYER_KILLED, (p: PlayerKilledPayload) => this.playerKilledListeners.forEach((cb) => cb(p)));
+    this.socket.on(EVENTS.BODY_DISCOVERED, (p: BodyDiscoveredPayload) => this.bodyDiscoveredListeners.forEach((cb) => cb(p)));
+
+    this.socket.on(EVENTS.RTC_SIGNAL, (data: { senderId: string; signal: any }) => {
+      this.rtcSignalListeners.forEach((cb) => cb(data));
+    });
+    this.socket.on(EVENTS.RTC_INIT_PEER, (data: { senderId: string }) => {
+      this.rtcInitPeerListeners.forEach((cb) => cb(data));
+    });
+    this.socket.on(EVENTS.VOICE_SPEAKING_UPDATE, (data: { playerId: string; isSpeaking: boolean }) => {
+      this.voiceSpeakingListeners.forEach((cb) => cb(data));
+    });
 
     this.socket.on('disconnect', () => {
       console.log('[Net] Disconnected from server');
@@ -161,12 +216,28 @@ class NetworkManager {
   public castVote(targetId: string): void {
     this.socket?.emit(EVENTS.CAST_VOTE, { targetId });
   }
+  public sabotage(type: string, room?: string): void {
+    this.socket?.emit(EVENTS.SABOTAGE, { type, room });
+  }
+  public fixSabotage(type: string, switchIndex?: number, pad?: string): void {
+    this.socket?.emit(EVENTS.FIX_SABOTAGE, { type, switchIndex, pad });
+  }
   public sendChat(text: string): void {
     this.socket?.emit(EVENTS.CHAT_MESSAGE, { text });
+  }
+  public sendChatMessage(text: string, scope: ChatScope = 'team'): void {
+    this.socket?.emit(EVENTS.CHAT_MESSAGE, { text, scope });
   }
   public onChat(cb: (m: ChatMessage) => void): () => void {
     this.chatListeners.add(cb);
     return () => this.chatListeners.delete(cb);
+  }
+  public onChatMessage(cb: (m: ChatBroadcastMessage) => void): () => void {
+    this.chatBroadcastListeners.add(cb);
+    return () => this.chatBroadcastListeners.delete(cb);
+  }
+  public getMyRole(): string {
+    return this.myRole;
   }
   public onGameOver(cb: (g: GameOverInfo) => void): () => void {
     this.gameOverListeners.add(cb);
@@ -202,6 +273,43 @@ class NetworkManager {
   public onMovement(cb: MovementListener): () => void {
     this.movementListeners.add(cb);
     return () => this.movementListeners.delete(cb);
+  }
+
+  public sendRtcSignal(targetId: string, signal: any): void {
+    this.socket?.emit(EVENTS.RTC_SIGNAL, { targetId, signal });
+  }
+
+  public initRtcPeer(targetId: string): void {
+    this.socket?.emit(EVENTS.RTC_INIT_PEER, { targetId });
+  }
+
+  public sendVoiceSpeaking(isSpeaking: boolean): void {
+    this.socket?.emit(EVENTS.VOICE_SPEAKING_UPDATE, { isSpeaking });
+  }
+
+  public onRtcSignal(cb: (data: { senderId: string; signal: any }) => void): () => void {
+    this.rtcSignalListeners.add(cb);
+    return () => this.rtcSignalListeners.delete(cb);
+  }
+
+  public onRtcInitPeer(cb: (data: { senderId: string }) => void): () => void {
+    this.rtcInitPeerListeners.add(cb);
+    return () => this.rtcInitPeerListeners.delete(cb);
+  }
+
+  public onVoiceSpeakingUpdate(cb: (data: { playerId: string; isSpeaking: boolean }) => void): () => void {
+    this.voiceSpeakingListeners.add(cb);
+    return () => this.voiceSpeakingListeners.delete(cb);
+  }
+
+  public onPlayerKilled(cb: (p: PlayerKilledPayload) => void): () => void {
+    this.playerKilledListeners.add(cb);
+    return () => this.playerKilledListeners.delete(cb);
+  }
+
+  public onBodyDiscovered(cb: (p: BodyDiscoveredPayload) => void): () => void {
+    this.bodyDiscoveredListeners.add(cb);
+    return () => this.bodyDiscoveredListeners.delete(cb);
   }
 }
 

@@ -27,13 +27,17 @@ import {
   sanitizePlayerName,
 } from '../../shared/constants';
 import {
+  BodyDiscoveredPayload,
   BodyView,
   ChatMessage,
   EVENTS,
   GameOverInfo,
   GameStateSnapshot,
+  MeetingIncidentLogEntry,
   MeetingResults,
   MeetingView,
+  PlayerKilledPayload,
+  PlayerMatchStats,
   PlayerSnapshot,
   Role,
   TaskView,
@@ -44,12 +48,16 @@ import {
   EMERGENCY_BUTTON_RANGE,
   MAP_VENTS,
   detectRoom,
+  getActiveWalls,
   getRoomSpot,
   getSpawnPosition,
 } from '../../shared/mapData';
 import { findPath } from '../../shared/nav';
 import { lineIntersectsWalls, resolveWallCollisions } from '../../shared/physics';
+import { generateBotMeetingStatement } from './meeting';
+import { GhostManager } from './ghostManager';
 import { assignRoles } from './roles';
+import { SabotageManager } from './sabotage';
 import { GameStateMachine } from './stateMachine';
 import { ALL_TASKS, TaskDefinition, pickCommonTasks, pickPersonalTasks } from './tasks';
 
@@ -89,6 +97,7 @@ interface GamePlayer extends PlayerSnapshot {
   working: { taskId: string; startedAt: number } | null;
   lastChatAt: number;
   brain?: BotBrain;
+  stats: PlayerMatchStats;
 }
 
 interface Body extends BodyView {
@@ -116,16 +125,26 @@ export class GameRoom {
   public players: Map<string, GamePlayer> = new Map();
 
   private bodies: Map<string, Body> = new Map();
+  private discoveredBodies: Set<string> = new Set();
   private meeting: Meeting | null = null;
+  private meetingHistory: MeetingIncidentLogEntry[] = [];
+  private matchStartTime: number = Date.now();
   private phaseEndsAt = 0;
   private emergencyReadyAt = 0;
   private winner: 'crewmates' | 'impostors' | null = null;
   private ended = false;
   private chatCounter = 0;
+  private totalSabotagesCount = 0;
 
   private tickInterval: NodeJS.Timeout | null = null;
   private lastTickTime = Date.now();
   private onEnd: () => void;
+  private sabotageManager: SabotageManager = new SabotageManager();
+  private ghostManager: GhostManager = new GhostManager();
+
+  public getGhostManager(): GhostManager {
+    return this.ghostManager;
+  }
 
   constructor(
     code: string,
@@ -194,6 +213,17 @@ export class GameRoom {
         lastInputAt: startNow,
         working: null,
         lastChatAt: 0,
+        stats: {
+          tasksCompleted: 0,
+          totalTasks: defs.length,
+          timesSabotaged: 0,
+          sabotagesFixed: 0,
+          killsCount: 0,
+          bodiesReported: 0,
+          emergenciesCalled: 0,
+          survived: true,
+          eliminationReason: 'alive',
+        },
       };
       if (seat.isBot) gp.brain = this.newBrain(spawn);
       this.players.set(seat.id, gp);
@@ -232,8 +262,9 @@ export class GameRoom {
     }
     let nx = p.x + dx;
     let nz = p.z + dz;
-    if (p.isAlive) {
-      const r = resolveWallCollisions(nx, nz);
+    if (p.isAlive && !this.ghostManager.canNoclip(p.id)) {
+      const activeWalls = getActiveWalls(this.sabotageManager.getLockedDoors());
+      const r = resolveWallCollisions(nx, nz, undefined, activeWalls);
       nx = r.x;
       nz = r.z;
     }
@@ -270,8 +301,8 @@ export class GameRoom {
     if (!p.working || p.working.taskId !== taskId) return;
     const st = this.currentStep(p, taskId);
     if (!st) return;
-    if (Math.hypot(p.x - st.x, p.z - st.z) > TASK_RANGE + 0.8) return;
-    if (Date.now() - p.working.startedAt < st.hold * 1000 - 400) return; // too fast
+    if (Math.hypot(p.x - st.x, p.z - st.z) > TASK_RANGE + 1.2) return;
+    if (Date.now() - p.working.startedAt < 350) return; // Debounce
     p.working = null;
     this.advanceTask(p, taskId);
   }
@@ -298,16 +329,49 @@ export class GameRoom {
     const body = this.bodies.get(bodyId);
     if (!p || !body || !p.isAlive || this.stateMachine.currentState !== GAME_STATES.PLAYING || p.ventId) return;
     if (Math.hypot(p.x - body.x, p.z - body.z) > REPORT_RANGE + 0.5) return;
+    this.discoveredBodies.add(bodyId);
     this.startMeeting(p, 'body', body);
   }
 
   public callEmergency(callerId: string): void {
     const p = this.players.get(callerId);
     if (!p || !p.isAlive || this.stateMachine.currentState !== GAME_STATES.PLAYING || p.ventId) return;
+    if (this.sabotageManager.isEmergencyBlocked()) return;
     if (p.emergenciesLeft <= 0 || Date.now() < this.emergencyReadyAt) return;
     if (Math.hypot(p.x - EMERGENCY_BUTTON_POS.x, p.z - EMERGENCY_BUTTON_POS.z) > EMERGENCY_BUTTON_RANGE + 0.8) return;
     p.emergenciesLeft--;
     this.startMeeting(p, 'emergency');
+  }
+
+  public sabotage(socketId: string, data: { type: string; room?: string }): void {
+    const p = this.players.get(socketId);
+    if (!p || p.role !== 'impostor' || !p.isAlive || this.stateMachine.currentState !== GAME_STATES.PLAYING) return;
+    const res = this.sabotageManager.trigger({
+      type: data?.type as any,
+      room: data?.room as any,
+    });
+    if (res.success) {
+      p.stats.timesSabotaged++;
+      this.totalSabotagesCount++;
+      this.io.to(this.code).emit(EVENTS.SABOTAGE_STARTED, this.sabotageManager.getActiveSabotage());
+    }
+  }
+
+  public fixSabotage(socketId: string, data: { type: string; switchIndex?: number; pad?: string }): void {
+    const p = this.players.get(socketId);
+    if (!p || !p.isAlive || this.stateMachine.currentState !== GAME_STATES.PLAYING) return;
+    const res = this.sabotageManager.fix({
+      type: data?.type as any,
+      switchIndex: data?.switchIndex,
+      pad: data?.pad as any,
+    });
+    if (res.resolved) {
+      p.stats.sabotagesFixed++;
+      this.io.to(this.code).emit(EVENTS.SABOTAGE_RESOLVED, { type: data.type });
+    } else if (res.updated) {
+      p.stats.sabotagesFixed++;
+      this.io.to(this.code).emit(EVENTS.SABOTAGE_UPDATED, this.sabotageManager.getActiveSabotage());
+    }
   }
 
   public ventEnter(id: string, ventId: string): void {
@@ -360,14 +424,29 @@ export class GameRoom {
 
   public chat(senderId: string, rawText: string): void {
     const p = this.players.get(senderId);
+    if (!p) return;
+    const isGhost = this.ghostManager.isGhost(p.id) || !p.isAlive;
     const m = this.meeting;
-    if (!p || !m || (m.phase !== 'DISCUSSION' && m.phase !== 'VOTING')) return;
+    const isMeetingActive = m && (m.phase === 'DISCUSSION' || m.phase === 'VOTING');
+    // Living players only chat during active meetings; dead ghost players can chat anytime in Haunt Chat!
+    if (!isGhost && !isMeetingActive) return;
+
     const now = Date.now();
-    if (now - p.lastChatAt < 700) return;
+    if (now - p.lastChatAt < 500) return;
     p.lastChatAt = now;
     const text = String(rawText || '').trim().slice(0, MAX_CHAT_LENGTH);
     if (!text) return;
-    this.broadcastChat(p, text);
+
+    if (isGhost) {
+      this.ghostManager.broadcastGhostChat(
+        { id: p.id, name: p.name, colorId: p.colorId, hatId: p.hatId, room: p.room },
+        text,
+        this.humans(),
+        this.io
+      );
+    } else {
+      this.broadcastChat(p, text);
+    }
   }
 
   public destroy(): void {
@@ -402,11 +481,18 @@ export class GameRoom {
           for (const p of this.players.values()) p.lastInputAt = now;
         }
         break;
-      case GAME_STATES.PLAYING:
+      case GAME_STATES.PLAYING: {
+        const { criticalFailed, failedType } = this.sabotageManager.tick(now);
+        if (criticalFailed) {
+          this.endGame('impostors', failedType || 'Critical Sabotage');
+          break;
+        }
+        this.checkBodySightings();
         for (const p of [...this.players.values()]) {
           if (p.isBot && this.stateMachine.currentState === GAME_STATES.PLAYING) this.botUpdate(p, now, dt);
         }
         break;
+      }
       case GAME_STATES.MEETING:
         this.advanceMeeting(now);
         break;
@@ -444,9 +530,16 @@ export class GameRoom {
       };
     }
 
-    const bodies: BodyView[] = [...this.bodies.values()].map((b) => ({ id: b.id, colorId: b.colorId, x: b.x, z: b.z }));
+    const bodies: BodyView[] = [...this.bodies.values()].map((b) => ({
+      id: b.id,
+      colorId: b.colorId,
+      x: b.x,
+      z: b.z,
+      room: b.room,
+    }));
     const meeting = this.meeting ? this.meetingView(now) : undefined;
-    const taskProgress = this.taskProgress();
+    const stats = this.taskStats();
+    const taskProgress = stats.progress;
 
     for (const human of this.humans()) {
       const snapshot: GameStateSnapshot = {
@@ -456,8 +549,13 @@ export class GameRoom {
         bodies,
         meeting,
         taskProgress,
+        tasksCompleted: stats.done,
+        totalTasks: stats.total,
         you: this.youView(human, now),
         winner: this.winner || undefined,
+        sabotage: this.sabotageManager.getActiveSabotage(),
+        lockedDoors: this.sabotageManager.getLockedDoors(),
+        meetingHistory: [...this.meetingHistory],
       };
       this.io.to(human.id).emit(EVENTS.STATE_SNAPSHOT, snapshot);
     }
@@ -495,11 +593,16 @@ export class GameRoom {
     if (!t || t.done) return;
     // Impostors only fake tasks: it looks the same to them but never counts toward progress.
     t.step++;
-    if (t.step >= t.def.steps.length) t.done = true;
+    if (t.step >= t.def.steps.length) {
+      if (!t.done) {
+        t.done = true;
+        p.stats.tasksCompleted++;
+      }
+    }
     if (p.role === 'crewmate') this.checkWin();
   }
 
-  private taskProgress(): number {
+  private taskStats(): { done: number; total: number; progress: number } {
     let total = 0;
     let done = 0;
     for (const p of this.players.values()) {
@@ -509,7 +612,12 @@ export class GameRoom {
         done += t.done ? t.def.steps.length : t.step;
       }
     }
-    return total === 0 ? 0 : done / total;
+    const progress = total === 0 ? 0 : done / total;
+    return { done, total, progress };
+  }
+
+  private taskProgress(): number {
+    return this.taskStats().progress;
   }
 
   // ---------------------------------------------------------------------------
@@ -522,6 +630,10 @@ export class GameRoom {
     victim.working = null;
     victim.ventId = null;
     victim.inVent = false;
+    victim.stats.survived = false;
+    victim.stats.eliminationReason = 'killed';
+    killer.stats.killsCount++;
+    this.ghostManager.eliminatePlayer(victim, 'killed', killer.id);
     this.bodies.set(victim.id, {
       id: victim.id,
       colorId: victim.colorId,
@@ -547,8 +659,59 @@ export class GameRoom {
       }
     }
 
-    this.io.to(this.code).emit(EVENTS.PLAYER_KILLED, { victimId: victim.id });
+    const dx = victim.x - killer.x;
+    const dz = victim.z - killer.z;
+    const dist = Math.hypot(dx, dz) || 1;
+    const impulseX = (dx / dist) * 2.8;
+    const impulseZ = (dz / dist) * 2.8;
+
+    const killPayload: PlayerKilledPayload = {
+      victimId: victim.id,
+      victimName: victim.name,
+      victimColorId: victim.colorId,
+      killerId: killer.id,
+      killerName: killer.name,
+      x: victim.x,
+      z: victim.z,
+      room: victim.room,
+      impulseX,
+      impulseZ,
+      timestamp: Date.now(),
+    };
+
+    this.io.to(this.code).emit(EVENTS.PLAYER_KILLED, killPayload);
     this.checkWin();
+  }
+
+  private checkBodySightings(): void {
+    if (this.bodies.size === 0) return;
+    for (const [bodyId, body] of this.bodies) {
+      if (this.discoveredBodies.has(bodyId)) continue;
+      for (const p of this.players.values()) {
+        if (!p.isAlive || p.ventId || p.inVent) continue;
+        const dist = Math.hypot(p.x - body.x, p.z - body.z);
+        // Discovery range: within REPORT_RANGE + 1.5 (~4.0m) with direct line-of-sight
+        if (dist <= REPORT_RANGE + 1.5) {
+          const los = lineIntersectsWalls(p.x, p.z, body.x, body.z);
+          if (!los.hit) {
+            this.discoveredBodies.add(bodyId);
+            const payload: BodyDiscoveredPayload = {
+              bodyId,
+              victimColorId: body.colorId,
+              discovererId: p.id,
+              discovererName: p.name,
+              discovererColorId: p.colorId,
+              room: body.room,
+              x: body.x,
+              z: body.z,
+              timestamp: Date.now(),
+            };
+            this.io.to(this.code).emit(EVENTS.BODY_DISCOVERED, payload);
+            break;
+          }
+        }
+      }
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -568,7 +731,29 @@ export class GameRoom {
       bodyRoom: body?.room,
       votes: new Map(),
     };
+
+    const roundNumber = this.meetingHistory.length + 1;
+    const elapsedSec = Math.floor((now - this.matchStartTime) / 1000);
+    const mins = Math.floor(elapsedSec / 60);
+    const secs = elapsedSec % 60;
+    const timeFormatted = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+
+    this.meetingHistory.push({
+      id: `inc_${roundNumber}_${now}`,
+      roundNumber,
+      callerId: caller.id,
+      callerName: caller.name,
+      callerColorId: caller.colorId,
+      reason,
+      bodyColorId: body?.colorId,
+      bodyRoom: body?.room,
+      timestamp: now,
+      timeFormatted,
+    });
+
     this.bodies.clear();
+    this.discoveredBodies.clear();
+    this.sabotageManager.clearAll();
     this.stateMachine.transitionTo(GAME_STATES.MEETING);
 
     // Everyone gathers around the table; vents and tasks are interrupted.
@@ -678,6 +863,13 @@ export class GameRoom {
     m.results = results;
     m.phase = 'RESULTS';
     m.endsAt = now + MEETING_RESULTS_MS;
+
+    const currentIncident = this.meetingHistory[this.meetingHistory.length - 1];
+    if (currentIncident) {
+      currentIncident.outcome = results.outcome;
+      currentIncident.ejectedName = results.ejectedName;
+      currentIncident.ejectedColorId = results.ejectedColorId;
+    }
   }
 
   private applyEjection(m: Meeting): void {
@@ -686,9 +878,14 @@ export class GameRoom {
     const ejected = this.players.get(r.ejectedId);
     if (!ejected) return;
     ejected.isAlive = false;
+    this.ghostManager.eliminatePlayer(ejected, 'ejected');
     if (this.settings.confirmEjects) {
       r.wasImpostor = ejected.role === 'impostor';
       r.impostorsRemaining = [...this.players.values()].filter((p) => p.isAlive && p.role === 'impostor').length;
+      const currentIncident = this.meetingHistory[this.meetingHistory.length - 1];
+      if (currentIncident) {
+        currentIncident.wasImpostor = r.wasImpostor;
+      }
     }
   }
 
@@ -722,25 +919,43 @@ export class GameRoom {
       phase: m.phase,
       remainingMs: Math.max(0, m.endsAt - now),
       callerName: m.callerName,
+      callerColorId: this.players.get(m.callerId)?.colorId,
       reason: m.reason,
       bodyColorId: m.bodyColorId,
+      bodyRoom: m.bodyRoom,
       voted: [...m.votes.keys()],
       results: m.results,
+      history: [...this.meetingHistory],
     };
   }
 
   private broadcastChat(sender: GamePlayer, text: string): void {
-    const msg: ChatMessage = {
+    const isGhost = this.ghostManager.isGhost(sender.id) || !sender.isAlive;
+    if (isGhost) {
+      this.ghostManager.broadcastGhostChat(
+        { id: sender.id, name: sender.name, colorId: sender.colorId, hatId: sender.hatId, room: sender.room },
+        text,
+        this.humans(),
+        this.io
+      );
+      return;
+    }
+
+    const msg = {
       id: `c${++this.chatCounter}`,
       senderId: sender.id,
       name: sender.name,
+      senderName: sender.name,
       colorId: sender.colorId,
+      senderColorId: sender.colorId,
+      senderHatId: sender.hatId,
       text,
-      ghost: !sender.isAlive,
+      ghost: false,
+      scope: 'team' as const,
+      timestamp: Date.now(),
+      senderRoom: sender.room,
     };
     for (const h of this.humans()) {
-      // Ghost chat is only visible to other ghosts.
-      if (msg.ghost && h.isAlive) continue;
       this.io.to(h.id).emit(EVENTS.CHAT_BROADCAST, msg);
     }
   }
@@ -818,6 +1033,7 @@ export class GameRoom {
             return { id: v.id, x: v.x, z: v.z };
           })
         : [],
+      sabotageCooldownMs: p.role === 'impostor' ? this.sabotageManager.getCooldownRemainingMs(now) : undefined,
     };
   }
 
@@ -1074,19 +1290,33 @@ export class GameRoom {
   }
 
   private scheduleBotChat(m: Meeting, now: number): void {
+    const aliveNames = [...this.players.values()].filter((p) => p.isAlive).map((p) => p.name);
     for (const p of this.players.values()) {
       if (!p.isBot || !p.isAlive) continue;
       const b = p.brain!;
       b.chatLine = null;
       b.chatAt = now + 1500 + Math.random() * 5000;
-      if (m.callerId === p.id) {
-        b.chatLine = m.reason === 'body' ? `I found a body in ${m.bodyRoom || 'the ship'}!` : 'I called an emergency meeting.';
-      } else if (b.suspectId) {
-        const sus = this.players.get(b.suspectId);
-        if (sus) b.chatLine = `I saw ${sus.name} kill someone!`;
-      } else if (Math.random() < 0.25) {
-        b.chatLine = p.role === 'crewmate' ? `I was doing tasks in ${p.room}.` : `I was in ${p.room}, nothing weird.`;
-      }
+
+      const suspectPlayer = b.suspectId ? this.players.get(b.suspectId) : undefined;
+      const completedTaskNames = p.tasks.filter((t) => t.done).map((t) => t.def.name);
+
+      generateBotMeetingStatement({
+        botName: p.name,
+        botRole: p.role,
+        currentRoom: p.room,
+        completedTasks: completedTaskNames,
+        suspectName: suspectPlayer?.name,
+        isCaller: m.callerId === p.id,
+        meetingReason: m.reason,
+        callerName: m.callerName,
+        bodyRoom: m.bodyRoom,
+        bodyColor: m.bodyColorId,
+        alivePlayers: aliveNames,
+      })
+        .then((statement) => {
+          b.chatLine = statement;
+        })
+        .catch(() => {});
     }
   }
 

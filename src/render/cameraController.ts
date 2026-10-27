@@ -21,6 +21,8 @@ export class CameraController {
   public sensitivity: number = 0.005;
   public enableHeadBob: boolean = true;
   private headBobTimer: number = 0;
+  private shakeIntensity: number = 0;
+  private shakeDecay: number = 0;
 
   // Pointers & Drag
   private isDragging: boolean = false;
@@ -35,6 +37,11 @@ export class CameraController {
   public toggleViewMode(): CameraViewMode {
     this.mode = this.mode === 'third_person' ? 'first_person' : 'third_person';
     return this.mode;
+  }
+
+  public shake(intensity: number = 0.5, durationSec: number = 0.4): void {
+    this.shakeIntensity = intensity;
+    this.shakeDecay = intensity / Math.max(durationSec, 0.05);
   }
 
   // Listeners are named so they can be removed on dispose (previously every mount of the
@@ -162,6 +169,14 @@ export class CameraController {
       this.camera.position.z = THREE.MathUtils.damp(this.camera.position.z, targetCamZ, 12, delta);
 
       this.camera.lookAt(headPos);
+    }
+
+    if (this.shakeIntensity > 0) {
+      const ox = (Math.random() - 0.5) * this.shakeIntensity;
+      const oy = (Math.random() - 0.5) * this.shakeIntensity;
+      this.camera.position.x += ox;
+      this.camera.position.y += oy;
+      this.shakeIntensity = Math.max(0, this.shakeIntensity - this.shakeDecay * delta);
     }
   }
 }

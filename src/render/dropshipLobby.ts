@@ -7,7 +7,7 @@ import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { net } from '../net';
 import { CrewmateModel } from './crewmateModel';
-import { LobbyData, LobbyPlayer } from '../../shared/events';
+import { ChatScope, LobbyData, LobbyPlayer } from '../../shared/events';
 
 export class DropshipLobbyScene {
   private container: HTMLElement;
@@ -317,10 +317,18 @@ export class DropshipLobbyScene {
 
   private bindInputs(): void {
     window.addEventListener('keydown', (e) => {
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+        return;
+      }
       this.keys[e.code] = true;
     });
 
     window.addEventListener('keyup', (e) => {
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+        return;
+      }
       this.keys[e.code] = false;
     });
 
@@ -411,6 +419,17 @@ export class DropshipLobbyScene {
       if (id !== this.localPlayerId) {
         this.playerTargets.set(id, data);
       }
+    }
+  }
+
+  public displayChatBubble(
+    playerId: string,
+    text: string,
+    scope: ChatScope = 'team'
+  ): void {
+    const model = this.playerModels.get(playerId);
+    if (model) {
+      model.showChatBubble(text, scope);
     }
   }
 

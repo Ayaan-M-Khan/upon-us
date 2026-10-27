@@ -163,10 +163,91 @@ function buildWalls(): WallSegment[] {
 
 export const MAP_WALLS: WallSegment[] = buildWalls();
 
-/** Cells whose full 3x3 neighbourhood is floor: safe centres for bots to path through. */
+export interface PropCollider {
+  id: string;
+  name: string;
+  bounds: Rect;
+}
+
+export const PROP_COLLIDERS: PropCollider[] = [
+  // Cafeteria central emergency table: center (0, -22), radius 2.6
+  { id: 'prop_cafeteria_center', name: 'Emergency Table', bounds: rect(-2.6, 2.6, -24.6, -19.4) },
+  // Cafeteria 4 bench tables: radius 1.4
+  { id: 'prop_cafeteria_bench_nw', name: 'Cafeteria Table NW', bounds: rect(-9.4, -6.6, -27.4, -24.6) },
+  { id: 'prop_cafeteria_bench_ne', name: 'Cafeteria Table NE', bounds: rect(6.6, 9.4, -27.4, -24.6) },
+  { id: 'prop_cafeteria_bench_sw', name: 'Cafeteria Table SW', bounds: rect(-9.4, -6.6, -19.4, -16.6) },
+  { id: 'prop_cafeteria_bench_se', name: 'Cafeteria Table SE', bounds: rect(6.6, 9.4, -19.4, -16.6) },
+  // Reactor core: center (-49, -3), radius 1.8 + torus 2.1
+  { id: 'prop_reactor_core', name: 'Reactor Core', bounds: rect(-51.0, -47.0, -5.0, -1.0) },
+  // Upper Engine block: center (-39, -25), cylinder length 4 along X, radius 1.5
+  { id: 'prop_upper_engine', name: 'Upper Engine Block', bounds: rect(-41.2, -36.8, -26.6, -23.4) },
+  // Lower Engine block: center (-39, 17), cylinder length 4 along X, radius 1.5
+  { id: 'prop_lower_engine', name: 'Lower Engine Block', bounds: rect(-41.2, -36.8, 15.4, 18.6) },
+  // Medbay scanner pad: center (-19, -14), radius 1.3
+  { id: 'prop_medbay_scanner', name: 'Medbay Scanner', bounds: rect(-20.4, -17.6, -15.4, -12.6) },
+  // Admin hologram table: center (15, 0), box 3.6 x 2.2
+  { id: 'prop_admin_table', name: 'Admin Table', bounds: rect(13.2, 16.8, -1.1, 1.1) },
+  // Storage cargo crates: center (-1, 23)
+  { id: 'prop_storage_crates', name: 'Storage Crates', bounds: rect(-2.4, 4.0, 21.4, 25.4) },
+];
+
+export function rectToWalls(r: Rect): WallSegment[] {
+  return [
+    { x1: r.minX, z1: r.minZ, x2: r.maxX, z2: r.minZ },
+    { x1: r.maxX, z1: r.minZ, x2: r.maxX, z2: r.maxZ },
+    { x1: r.maxX, z1: r.maxZ, x2: r.minX, z2: r.maxZ },
+    { x1: r.minX, z1: r.maxZ, x2: r.minX, z2: r.minZ },
+  ];
+}
+
+export const PROP_WALLS: WallSegment[] = PROP_COLLIDERS.flatMap((p) => rectToWalls(p.bounds));
+export const ALL_OBSTACLE_WALLS: WallSegment[] = [...MAP_WALLS, ...PROP_WALLS];
+
+export const DOOR_BARRIERS: Record<'Cafeteria' | 'Storage', WallSegment[]> = {
+  Cafeteria: [
+    { x1: -12, z1: -27, x2: -12, z2: -23 },
+    { x1: -2, z1: -14, x2: 2, z2: -14 },
+    { x1: 12, z1: -28, x2: 12, z2: -24 },
+  ],
+  Storage: [
+    { x1: -2, z1: 14, x2: 2, z2: 14 },
+    { x1: -10, z1: 16, x2: -10, z2: 20 },
+    { x1: 8, z1: 26, x2: 8, z2: 30 },
+  ],
+};
+
+export function getActiveWalls(lockedDoors?: ('Cafeteria' | 'Storage')[]): WallSegment[] {
+  if (!lockedDoors || lockedDoors.length === 0) {
+    return ALL_OBSTACLE_WALLS;
+  }
+  const extra: WallSegment[] = [];
+  for (const room of lockedDoors) {
+    if (DOOR_BARRIERS[room]) {
+      extra.push(...DOOR_BARRIERS[room]);
+    }
+  }
+  return [...ALL_OBSTACLE_WALLS, ...extra];
+}
+
+function isInsideProp(x: number, z: number): boolean {
+  for (const p of PROP_COLLIDERS) {
+    if (x >= p.bounds.minX - 0.25 && x <= p.bounds.maxX + 0.25 && z >= p.bounds.minZ - 0.25 && z <= p.bounds.maxZ + 0.25) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** Cells whose full 3x3 neighbourhood is floor and not inside a prop: safe centres for bots to path through. */
 const navGrid = new Uint8Array(GRID.cols * GRID.rows);
 for (let j = 0; j < GRID.rows; j++) {
   for (let i = 0; i < GRID.cols; i++) {
+    const wx = GRID.minX + i + 0.5;
+    const wz = GRID.minZ + j + 0.5;
+    if (isInsideProp(wx, wz)) {
+      navGrid[j * GRID.cols + i] = 0;
+      continue;
+    }
     let ok = true;
     for (let dj = -1; dj <= 1 && ok; dj++) {
       for (let di = -1; di <= 1; di++) {
