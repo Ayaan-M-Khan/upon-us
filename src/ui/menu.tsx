@@ -70,16 +70,16 @@ export const MainMenu: React.FC<MenuProps> = ({ onLobbyJoined, initialJoinCode }
   };
 
   return (
-    <div className="relative w-full h-full flex flex-col items-center justify-between p-6 select-none overflow-hidden starfield-bg text-white">
+    <div className="relative w-full h-full flex flex-col items-center justify-between px-4 py-4 sm:p-6 select-none overflow-y-auto starfield-bg text-white">
       {/* Decorative stars and nebula background overlay */}
-      <div className="absolute inset-0 pointer-events-none opacity-40 bg-[radial-gradient(circle_at_50%_40%,rgba(56,189,248,0.15),transparent_60%)]" />
+      <div className="absolute inset-0 pointer-events-none opacity-60 bg-[radial-gradient(ellipse_at_50%_30%,rgba(34,211,238,0.19),transparent_55%)]" />
 
       {/* Top Header */}
-      <div className="w-full max-w-4xl flex items-center justify-between z-10 pt-2">
+      <div className="w-full max-w-4xl flex items-center justify-between gap-3 z-10 pt-2">
         <div className="flex items-center space-x-2 bg-slate-900/80 backdrop-blur-md px-4 py-2 rounded-full border border-slate-700/60 shadow-lg">
           <Sparkles className="w-4 h-4 text-cyan-400" />
-          <span className="text-xs uppercase tracking-widest font-bold text-slate-300">
-            Phase 1 • 3D Multiplayer Lobby
+          <span className="text-[10px] sm:text-xs uppercase tracking-wider sm:tracking-widest font-bold text-slate-300">
+            LIVE MULTIPLAYER • THE SKELD
           </span>
         </div>
 
@@ -108,33 +108,35 @@ export const MainMenu: React.FC<MenuProps> = ({ onLobbyJoined, initialJoinCode }
       </div>
 
       {/* Center Hero Logo & Action Panel */}
-      <div className="w-full max-w-md flex flex-col items-center z-10 my-auto space-y-6">
+      <div className="w-full max-w-md flex flex-col items-center z-10 my-auto py-8 sm:py-12 space-y-6">
         {/* Main Logo */}
-        <div className="text-center space-y-1">
-          <h1 className="text-5xl md:text-6xl font-black tracking-tight text-transparent bg-clip-text bg-gradient-to-b from-cyan-300 via-sky-400 to-blue-600 drop-shadow-[0_8px_16px_rgba(2,132,199,0.5)]">
+        <div className="text-center space-y-2">
+          <h1 className="text-4xl sm:text-5xl md:text-6xl font-black tracking-tight text-transparent bg-clip-text bg-gradient-to-b from-cyan-300 via-sky-400 to-blue-600 drop-shadow-[0_8px_16px_rgba(2,132,199,0.5)]">
             IMPOSTOR
           </h1>
           <h2 className="text-2xl md:text-3xl font-extrabold tracking-widest text-slate-300 drop-shadow-[0_4px_8px_rgba(0,0,0,0.8)]">
             PROTOCOL
           </h2>
           <p className="text-xs uppercase tracking-widest text-cyan-400 font-semibold pt-1">
-            Third-Person 3D Social Deduction
+            TRUST YOUR CREW. QUESTION EVERYONE.
           </p>
         </div>
 
         {/* Player Name Input Card */}
-        <div className="w-full bg-slate-900/85 backdrop-blur-xl p-5 rounded-2xl border-2 border-slate-700/80 shadow-2xl space-y-4">
+        <div className="w-full bg-slate-900/90 backdrop-blur-xl p-5 sm:p-6 rounded-3xl border border-cyan-400/25 shadow-[0_25px_70px_rgba(0,0,0,0.55)] space-y-4">
           <div>
-            <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5">
+            <label htmlFor="crewmate-name" className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5">
               Crewmate Name (Max 10)
             </label>
             <input
+              id="crewmate-name"
               type="text"
+              autoComplete="nickname"
               maxLength={10}
               value={playerName}
               onChange={(e) => handleNameChange(e.target.value)}
               placeholder="Enter your name..."
-              className="w-full px-4 py-3 bg-slate-950/80 border-2 border-slate-700 rounded-xl text-lg font-bold text-center tracking-wider text-cyan-300 focus:outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-400/30 transition-all placeholder-slate-600"
+              className="w-full px-4 py-3 bg-slate-950/80 border-2 border-slate-700 rounded-xl text-lg font-bold text-center tracking-wider text-cyan-300 focus-visible:outline-none focus-visible:border-cyan-400 focus-visible:ring-2 focus-visible:ring-cyan-400/40 transition-all placeholder-slate-600"
             />
           </div>
 
@@ -148,7 +150,7 @@ export const MainMenu: React.FC<MenuProps> = ({ onLobbyJoined, initialJoinCode }
           <div className="grid grid-cols-1 gap-3 pt-2">
             <button
               onClick={handleCreateLobby}
-              className="w-full py-3.5 px-6 rounded-xl font-black text-lg tracking-wider text-slate-950 bg-gradient-to-r from-emerald-400 to-teal-400 hover:from-emerald-300 hover:to-teal-300 shadow-[0_6px_20px_rgba(16,185,129,0.35)] active:translate-y-0.5 transition-all flex items-center justify-center space-x-2 cursor-pointer border border-emerald-300/60"
+              className="w-full py-3.5 px-6 rounded-xl font-black text-lg tracking-wider text-slate-950 bg-gradient-to-r from-emerald-400 to-teal-400 hover:from-emerald-300 hover:to-teal-300 shadow-[0_6px_20px_rgba(16,185,129,0.35)] active:translate-y-0.5 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-emerald-300/60 transition-all flex items-center justify-center space-x-2 cursor-pointer border border-emerald-300/60"
             >
               <Play className="w-5 h-5 fill-current" />
               <span>CREATE LOBBY</span>
@@ -157,9 +159,10 @@ export const MainMenu: React.FC<MenuProps> = ({ onLobbyJoined, initialJoinCode }
             <button
               onClick={() => {
                 soundEngine.playClick();
+                setErrorMessage('');
                 setShowJoinModal(true);
               }}
-              className="w-full py-3.5 px-6 rounded-xl font-black text-lg tracking-wider text-white bg-slate-800 hover:bg-slate-750 border-2 border-cyan-500/50 hover:border-cyan-400 shadow-[0_6px_20px_rgba(6,182,212,0.2)] active:translate-y-0.5 transition-all flex items-center justify-center space-x-2 cursor-pointer"
+              className="w-full py-3.5 px-6 rounded-xl font-black text-lg tracking-wider text-white bg-slate-800 hover:bg-slate-700 border-2 border-cyan-500/50 hover:border-cyan-400 shadow-[0_6px_20px_rgba(6,182,212,0.2)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-cyan-300/60 active:translate-y-0.5 transition-all flex items-center justify-center space-x-2 cursor-pointer"
             >
               <LogIn className="w-5 h-5" />
               <span>JOIN LOBBY</span>
@@ -169,15 +172,15 @@ export const MainMenu: React.FC<MenuProps> = ({ onLobbyJoined, initialJoinCode }
       </div>
 
       {/* Footer Info */}
-      <div className="z-10 text-center text-xs text-slate-400 font-medium">
+      <div className="z-10 text-center text-xs text-slate-400 font-medium pb-2">
         <span>Use WASD or Touch Joystick to move your crewmate in the 3D dropship.</span>
       </div>
 
       {/* JOIN LOBBY MODAL */}
       {showJoinModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 animate-fadeIn">
-          <div className="w-full max-w-sm bg-slate-900 border-2 border-slate-700 rounded-3xl p-6 shadow-2xl space-y-4">
-            <h3 className="text-xl font-extrabold text-center tracking-wider text-cyan-300">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 animate-fadeIn" role="presentation">
+          <div role="dialog" aria-modal="true" aria-labelledby="join-modal-title" className="w-full max-w-sm bg-slate-900 border border-cyan-400/30 rounded-3xl p-6 shadow-2xl space-y-4">
+            <h3 id="join-modal-title" className="text-xl font-extrabold text-center tracking-wider text-cyan-300">
               JOIN WITH CODE
             </h3>
             <p className="text-xs text-center text-slate-400">
@@ -188,6 +191,8 @@ export const MainMenu: React.FC<MenuProps> = ({ onLobbyJoined, initialJoinCode }
               <input
                 type="text"
                 maxLength={5}
+                aria-label="Five-character lobby code"
+                autoComplete="off"
                 autoFocus
                 value={joinCodeInput}
                 onChange={(e) => setJoinCodeInput(e.target.value.toUpperCase())}
