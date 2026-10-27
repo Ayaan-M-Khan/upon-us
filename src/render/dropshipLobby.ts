@@ -315,58 +315,61 @@ export class DropshipLobbyScene {
     }
   }
 
-  private bindInputs(): void {
-    window.addEventListener('keydown', (e) => {
-      const target = e.target as HTMLElement | null;
-      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
-        return;
-      }
+  // Named handlers avoid leaving controls from old lobby scenes active after navigation.
+  private onKeyDown = (e: KeyboardEvent): void => {
+    const target = e.target as HTMLElement | null;
+    if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
+    if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) {
       this.keys[e.code] = true;
-    });
+      if (e.code.startsWith('Arrow')) e.preventDefault();
+    }
+  };
+  private onKeyUp = (e: KeyboardEvent): void => {
+    this.keys[e.code] = false;
+  };
+  private clearInput = (): void => {
+    this.keys = {};
+    this.joystickVector = { x: 0, y: 0 };
+    this.isPointerDown = false;
+  };
+  private onVisibility = (): void => {
+    if (document.hidden) this.clearInput();
+  };
+  private onPointerDown = (e: PointerEvent): void => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    this.isPointerDown = true;
+    this.lastPointerX = e.clientX;
+    this.lastPointerY = e.clientY;
+    this.renderer.domElement.setPointerCapture?.(e.pointerId);
+  };
+  private onPointerMove = (e: PointerEvent): void => {
+    if (!this.isPointerDown) return;
+    const dx = e.clientX - this.lastPointerX;
+    const dy = e.clientY - this.lastPointerY;
+    this.lastPointerX = e.clientX;
+    this.lastPointerY = e.clientY;
+    this.cameraAngleH -= dx * 0.006;
+    this.cameraAngleV = Math.max(0.1, Math.min(1.2, this.cameraAngleV + dy * 0.005));
+  };
+  private stopPointer = (): void => { this.isPointerDown = false; };
+  private onWheel = (e: WheelEvent): void => {
+    this.cameraDistance = Math.max(3.5, Math.min(10, this.cameraDistance + e.deltaY * 0.005));
+  };
 
-    window.addEventListener('keyup', (e) => {
-      const target = e.target as HTMLElement | null;
-      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
-        return;
-      }
-      this.keys[e.code] = false;
-    });
-
+  private bindInputs(): void {
     const dom = this.renderer.domElement;
-
-    // Mouse drag for camera orbit
-    dom.addEventListener('pointerdown', (e) => {
-      this.isPointerDown = true;
-      this.lastPointerX = e.clientX;
-      this.lastPointerY = e.clientY;
-    });
-
-    window.addEventListener('pointermove', (e) => {
-      if (!this.isPointerDown) return;
-      const dx = e.clientX - this.lastPointerX;
-      const dy = e.clientY - this.lastPointerY;
-      this.lastPointerX = e.clientX;
-      this.lastPointerY = e.clientY;
-
-      this.cameraAngleH -= dx * 0.006;
-      this.cameraAngleV = Math.max(0.1, Math.min(1.2, this.cameraAngleV + dy * 0.005));
-    });
-
-    window.addEventListener('pointerup', () => {
-      this.isPointerDown = false;
-    });
-
-    // Zoom
-    dom.addEventListener(
-      'wheel',
-      (e) => {
-        this.cameraDistance = Math.max(3.5, Math.min(10, this.cameraDistance + e.deltaY * 0.005));
-      },
-      { passive: true }
-    );
-
-    // Resize
-    window.addEventListener('resize', this.onResize.bind(this));
+    dom.style.touchAction = 'none';
+    window.addEventListener('keydown', this.onKeyDown);
+    window.addEventListener('keyup', this.onKeyUp);
+    window.addEventListener('blur', this.clearInput);
+    document.addEventListener('visibilitychange', this.onVisibility);
+    dom.addEventListener('pointerdown', this.onPointerDown);
+    dom.addEventListener('pointermove', this.onPointerMove);
+    dom.addEventListener('pointerup', this.stopPointer);
+    dom.addEventListener('pointercancel', this.stopPointer);
+    dom.addEventListener('lostpointercapture', this.stopPointer);
+    dom.addEventListener('wheel', this.onWheel, { passive: true });
+    window.addEventListener('resize', this.onResize);
   }
 
   public setJoystick(x: number, y: number): void {
@@ -549,7 +552,7 @@ export class DropshipLobbyScene {
     this.animationFrameId = requestAnimationFrame(this.tick);
   }
 
-  private onResize(): void {
+  private onResize = (): void => {
     if (!this.container || this.isDestroyed) return;
     const width = this.container.clientWidth;
     const height = Math.max(this.container.clientHeight, 1);
@@ -563,6 +566,18 @@ export class DropshipLobbyScene {
     cancelAnimationFrame(this.animationFrameId);
 
     window.removeEventListener('resize', this.onResize);
+    window.removeEventListener('keydown', this.onKeyDown);
+    window.removeEventListener('keyup', this.onKeyUp);
+    window.removeEventListener('blur', this.clearInput);
+    document.removeEventListener('visibilitychange', this.onVisibility);
+    const dom = this.renderer.domElement;
+    dom.removeEventListener('pointerdown', this.onPointerDown);
+    dom.removeEventListener('pointermove', this.onPointerMove);
+    dom.removeEventListener('pointerup', this.stopPointer);
+    dom.removeEventListener('pointercancel', this.stopPointer);
+    dom.removeEventListener('lostpointercapture', this.stopPointer);
+    dom.removeEventListener('wheel', this.onWheel);
+    this.clearInput();
 
     for (const model of this.playerModels.values()) {
       model.dispose();
