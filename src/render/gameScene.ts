@@ -261,7 +261,7 @@ export class GameScene {
         // Server-forced moves (kill teleport, meeting start, vents) and big desyncs snap us.
         const forced = (player.posSeq ?? 0) !== this.localPosSeq;
         const drift = Math.hypot(player.x - this.localPos.x, player.z - this.localPos.z);
-        if (forced || drift > 4) {
+        if (forced || drift > 1.5) {
           this.localPos.set(player.x, 0, player.z);
           this.localPosSeq = player.posSeq ?? 0;
           this.velocity.set(0, 0);
@@ -489,8 +489,9 @@ export class GameScene {
     this.velocity.y = THREE.MathUtils.damp(this.velocity.y, desiredVZ, accel, delta);
     if (inputLen <= 0.1 && Math.hypot(this.velocity.x, this.velocity.y) < 0.08) this.velocity.set(0, 0);
 
-    this.isMoving = Math.hypot(this.velocity.x, this.velocity.y) > 0.3;
-    if (this.isMoving) {
+    const hasVelocity = Math.hypot(this.velocity.x, this.velocity.y) > 0.3;
+    this.isMoving = false;
+    if (canMove && hasVelocity) {
       let tx = this.localPos.x + this.velocity.x * delta;
       let tz = this.localPos.z + this.velocity.y * delta;
 
@@ -498,13 +499,15 @@ export class GameScene {
       tx = r.x;
       tz = r.z;
 
+      const movedDistance = Math.hypot(tx - this.localPos.x, tz - this.localPos.z);
       this.localPos.x = tx;
       this.localPos.z = tz;
-      this.localRotation = Math.atan2(this.velocity.x, this.velocity.y);
+      this.isMoving = movedDistance > 0.001;
+      if (this.isMoving) this.localRotation = Math.atan2(this.velocity.x, this.velocity.y);
 
       // Play footstep audio with room acoustics and dynamic position-based pitch/panning
       const stepInterval = Math.max(180, 310 / Math.max(0.6, this.playerSpeedMultiplier));
-      if (meAlive && now - this.lastFootstepTime > stepInterval) {
+      if (this.isMoving && meAlive && now - this.lastFootstepTime > stepInterval) {
         this.lastFootstepTime = now;
         soundEngine.playFootstep(
           this.localPos.x,
