@@ -309,7 +309,7 @@ export const LobbyView: React.FC<LobbyProps> = ({ onLeave }) => {
               }`}
             >
               <Palette className="w-4 h-4" />
-              <span className="hidden xs:inline">CUSTOMIZE SUIT</span><span className="xs:hidden">SUIT</span>
+              <span className="hidden sm:inline">CUSTOMIZE SUIT</span><span className="sm:hidden">SUIT</span>
             </button>
 
             <button
