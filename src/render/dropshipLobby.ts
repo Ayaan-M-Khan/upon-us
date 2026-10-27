@@ -385,6 +385,14 @@ export class DropshipLobbyScene {
 
       if (!model) {
         model = new CrewmateModel(player.colorId, player.hatId, player.name, player.isHost);
+        model.updateNameTag({
+          name: player.name,
+          isHost: player.isHost,
+          isLocal: player.id === this.localPlayerId,
+          isDead: false,
+          isImpostor: false,
+          isBot: false,
+        });
         this.playerModels.set(player.id, model);
         this.scene.add(model.group);
 
@@ -397,7 +405,14 @@ export class DropshipLobbyScene {
       } else {
         model.setColor(player.colorId);
         model.setHat(player.hatId);
-        model.updateNameTag(player.name, player.isHost);
+        model.updateNameTag({
+          name: player.name,
+          isHost: player.isHost,
+          isLocal: player.id === this.localPlayerId,
+          isDead: false,
+          isImpostor: false,
+          isBot: false,
+        });
       }
     }
 

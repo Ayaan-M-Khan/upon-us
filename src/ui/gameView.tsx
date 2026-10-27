@@ -149,9 +149,21 @@ export const GameView: React.FC<GameViewProps> = ({ settings, onLeave }) => {
 
   const doVent = useCallback(() => {
     if (!playing || !you || you.role !== 'impostor') return;
-    if (you.ventId) net.ventExit();
-    else if (ctx.ventId) net.ventEnter(ctx.ventId);
+    soundEngine.playVentClank();
+    if (you.ventId) {
+      net.ventExit();
+    } else if (ctx.ventId) {
+      net.ventEnter(ctx.ventId);
+      sceneRef.current?.teleportToVent(ctx.ventId);
+    }
   }, [playing, you, ctx.ventId]);
+
+  const handleVentMove = useCallback((destId: string) => {
+    if (!playing || !you || !you.ventId) return;
+    soundEngine.playVentWhoosh();
+    sceneRef.current?.teleportToVent(destId);
+    net.ventMove(destId);
+  }, [playing, you]);
 
   // ---- Keyboard shortcuts ----
   useEffect(() => {
@@ -159,6 +171,37 @@ export const GameView: React.FC<GameViewProps> = ({ settings, onLeave }) => {
       const el = e.target as HTMLElement | null;
       if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) return;
       if (e.repeat) return;
+
+      // In-vent fast traversal shortcuts
+      if (you?.ventId && you.ventLinks && you.ventLinks.length > 0) {
+        if (e.code === 'KeyA' || e.code === 'ArrowLeft') {
+          e.preventDefault();
+          handleVentMove(you.ventLinks[0].id);
+          return;
+        }
+        if (e.code === 'KeyD' || e.code === 'ArrowRight') {
+          e.preventDefault();
+          const target = you.ventLinks.length > 1 ? you.ventLinks[1].id : you.ventLinks[0].id;
+          handleVentMove(target);
+          return;
+        }
+        if (e.code === 'Digit1' && you.ventLinks[0]) {
+          e.preventDefault();
+          handleVentMove(you.ventLinks[0].id);
+          return;
+        }
+        if (e.code === 'Digit2' && you.ventLinks[1]) {
+          e.preventDefault();
+          handleVentMove(you.ventLinks[1].id);
+          return;
+        }
+        if (e.code === 'Digit3' && you.ventLinks[2]) {
+          e.preventDefault();
+          handleVentMove(you.ventLinks[2].id);
+          return;
+        }
+      }
+
       if (e.code === 'KeyE' || e.code === 'Space') {
         if (e.code === 'Space') e.preventDefault();
         doUse();
@@ -169,7 +212,7 @@ export const GameView: React.FC<GameViewProps> = ({ settings, onLeave }) => {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [doUse, doReport, doKill, doVent, stopWork]);
+  }, [doUse, doReport, doKill, doVent, handleVentMove, stopWork, you]);
 
   const handleToggleCamera = () => {
     if (sceneRef.current) setCameraMode(sceneRef.current.cameraController.toggleViewMode());
@@ -207,7 +250,7 @@ export const GameView: React.FC<GameViewProps> = ({ settings, onLeave }) => {
         onReport={doReport}
         onKill={doKill}
         onVent={doVent}
-        onVentMove={(id) => net.ventMove(id)}
+        onVentMove={handleVentMove}
         onCancelWork={() => stopWork(true)}
         onJoystick={handleJoystick}
         onCameraSettings={handleCameraSettings}
