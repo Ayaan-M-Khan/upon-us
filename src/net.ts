@@ -5,7 +5,7 @@
 
 import { io, Socket } from 'socket.io-client';
 import { GameSettings } from '../shared/constants';
-import { ChatMessage, EVENTS, GameOverInfo, GameStateSnapshot, LobbyData } from '../shared/events';
+import { ChatMessage, EVENTS, GameOverInfo, GameStateSnapshot, LobbyData, SabotageType } from '../shared/events';
 
 type LobbyStateListener = (state: LobbyData | null) => void;
 type ErrorListener = (message: string) => void;
@@ -157,6 +157,12 @@ class NetworkManager {
   }
   public ventExit(): void {
     this.socket?.emit(EVENTS.VENT_EXIT);
+  }
+  public startSabotage(type: SabotageType): void {
+    this.socket?.emit(EVENTS.SABOTAGE, { type });
+  }
+  public fixSabotage(type: SabotageType): void {
+    this.socket?.emit(EVENTS.FIX_SABOTAGE, { type });
   }
   public castVote(targetId: string): void {
     this.socket?.emit(EVENTS.CAST_VOTE, { targetId });

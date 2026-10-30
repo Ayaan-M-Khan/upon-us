@@ -44,6 +44,10 @@ export const PLAYER_HATS: PlayerHat[] = [
   { id: 'horns', name: 'Horns' },
   { id: 'goggles', name: 'Goggles' },
   { id: 'flower', name: 'Flower' },
+  { id: 'crown', name: 'Crown' },
+  { id: 'antenna', name: 'Antenna' },
+  { id: 'chef', name: 'Chef Hat' },
+  { id: 'cowboy', name: 'Cowboy Hat' },
 ];
 
 export type KillDistance = 'Short' | 'Medium' | 'Long';

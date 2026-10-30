@@ -111,7 +111,7 @@ export const MainMenu: React.FC<MenuProps> = ({ onLobbyJoined, initialJoinCode }
       <div className="w-full max-w-md flex flex-col items-center z-10 my-auto space-y-6">
         {/* Main Logo */}
         <div className="text-center space-y-1">
-          <h1 className="text-5xl md:text-6xl font-black tracking-tight text-transparent bg-clip-text bg-gradient-to-b from-cyan-300 via-sky-400 to-blue-600 drop-shadow-[0_8px_16px_rgba(2,132,199,0.5)]">
+          <h1 className="text-5xl md:text-6xl font-black tracking-tight text-cyan-300 drop-shadow-[0_8px_16px_rgba(2,132,199,0.5)]">
             IMPOSTOR
           </h1>
           <h2 className="text-2xl md:text-3xl font-extrabold tracking-widest text-slate-300 drop-shadow-[0_4px_8px_rgba(0,0,0,0.8)]">
@@ -246,7 +246,14 @@ export const MainMenu: React.FC<MenuProps> = ({ onLobbyJoined, initialJoinCode }
               <div className="p-3 bg-red-950/40 border border-red-800/40 rounded-xl">
                 <h4 className="font-bold text-red-400 mb-1">🟥 IMPOSTOR OBJECTIVE</h4>
                 <p className="text-xs text-slate-300">
-                  Eliminate crewmates until impostors equal crewmates, or trigger an unstopped critical sabotage (Reactor Meltdown / O2 Depletion). Use vents to escape unseen.
+                  Eliminate crewmates until impostors equal the crew, or leave Reactor Meltdown / O2 Failure unrepaired. Other sabotages disrupt systems until the crew restores them.
+                </p>
+              </div>
+
+              <div className="p-3 bg-amber-950/40 border border-amber-800/40 rounded-xl">
+                <h4 className="font-bold text-amber-300 mb-1">🛠️ ENGINEER ROLE</h4>
+                <p className="text-xs text-slate-300">
+                  Engineers are crewmates who can use ship vents for 6 seconds at a time. Their vent access recharges for 20 seconds after exiting.
                 </p>
               </div>
 
@@ -259,7 +266,8 @@ export const MainMenu: React.FC<MenuProps> = ({ onLobbyJoined, initialJoinCode }
                   <div><strong className="text-white">Q:</strong> Kill (Impostor)</div>
                   <div><strong className="text-white">R:</strong> Report Dead Body</div>
                   <div><strong className="text-white">F:</strong> Vent In / Out</div>
-                  <div><strong className="text-white">M / Tab:</strong> Open Map / Sabotage</div>
+                  <div><strong className="text-white">M / Tab:</strong> Open Map</div>
+                  <div><strong className="text-white">Sabotage:</strong> Choose a system from the HUD</div>
                   <div><strong className="text-white">Touch:</strong> Virtual Joystick & HUD</div>
                 </div>
               </div>

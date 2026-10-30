@@ -54,7 +54,14 @@ export const EVENTS = {
   VOTE_CAST_ACK: 'voteCastAck',
 } as const;
 
-export type Role = 'crewmate' | 'impostor';
+export type Role = 'crewmate' | 'impostor' | 'engineer';
+export type SabotageType = 'reactor' | 'o2' | 'lights' | 'comms';
+
+export interface SabotageView {
+  type: SabotageType;
+  countdown: number;
+  activatedAt: number;
+}
 
 export interface LobbyPlayer {
   id: string; // Socket ID
@@ -147,6 +154,9 @@ export interface YouView {
   killCooldownMs: number;
   emergencyLeft: number;
   emergencyCooldownMs: number;
+  engineerVentCooldownMs: number;
+  engineerVentTimeLeftMs: number;
+  sabotageCooldownMs: number;
   ventId: string | null;
   ventLinks: { id: string; x: number; z: number }[];
 }
@@ -175,4 +185,5 @@ export interface GameStateSnapshot {
   taskProgress?: number; // 0..1
   you?: YouView;
   winner?: 'crewmates' | 'impostors';
+  sabotage?: SabotageView;
 }

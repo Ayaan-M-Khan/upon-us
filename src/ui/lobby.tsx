@@ -226,7 +226,7 @@ export const LobbyView: React.FC<LobbyProps> = ({ onLeave }) => {
       {startingCount !== null && startingCount > 0 && (
         <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-black/60 backdrop-blur-md animate-fadeIn">
           <h2 className="text-2xl font-black tracking-widest text-cyan-400 uppercase">GAME STARTING IN</h2>
-          <div className="text-8xl font-black text-yellow-300 animate-bounce drop-shadow-[0_10px_25px_rgba(234,179,8,0.6)]">
+          <div className="text-8xl font-black text-yellow-300 animate-pulse drop-shadow-[0_10px_25px_rgba(234,179,8,0.6)]">
             {startingCount}
           </div>
           <p className="text-sm text-slate-300 font-bold tracking-wider">PREPARING ROLES & SPACESHIP</p>
@@ -457,7 +457,7 @@ export const LobbyView: React.FC<LobbyProps> = ({ onLeave }) => {
                       min="0.5"
                       max="3.0"
                       step="0.25"
-                      value={lobby?.settings.playerSpeed || 1.0}
+                      value={lobby?.settings.playerSpeed ?? 1.0}
                       onChange={(e) => handleUpdateSetting('playerSpeed', parseFloat(e.target.value))}
                       className="w-full accent-cyan-400"
                     />
@@ -476,7 +476,7 @@ export const LobbyView: React.FC<LobbyProps> = ({ onLeave }) => {
                       min="10"
                       max="60"
                       step="2.5"
-                      value={lobby?.settings.killCooldown || 25}
+                      value={lobby?.settings.killCooldown ?? 25}
                       onChange={(e) => handleUpdateSetting('killCooldown', parseFloat(e.target.value))}
                       className="w-full accent-yellow-400"
                     />
@@ -520,7 +520,7 @@ export const LobbyView: React.FC<LobbyProps> = ({ onLeave }) => {
                       min="0.25"
                       max="3.0"
                       step="0.25"
-                      value={lobby?.settings.crewmateVision || 1.0}
+                      value={lobby?.settings.crewmateVision ?? 1.0}
                       onChange={(e) => handleUpdateSetting('crewmateVision', parseFloat(e.target.value))}
                       className="w-full accent-blue-400"
                     />
@@ -538,7 +538,7 @@ export const LobbyView: React.FC<LobbyProps> = ({ onLeave }) => {
                       min="0.25"
                       max="3.0"
                       step="0.25"
-                      value={lobby?.settings.impostorVision || 1.5}
+                      value={lobby?.settings.impostorVision ?? 1.5}
                       onChange={(e) => handleUpdateSetting('impostorVision', parseFloat(e.target.value))}
                       className="w-full accent-red-400"
                     />
@@ -557,7 +557,7 @@ export const LobbyView: React.FC<LobbyProps> = ({ onLeave }) => {
                       min="0"
                       max="2"
                       step="1"
-                      value={lobby?.settings.commonTasks || 1}
+                      value={lobby?.settings.commonTasks ?? 1}
                       onChange={(e) => handleUpdateSetting('commonTasks', parseInt(e.target.value))}
                       className="w-full accent-emerald-400"
                     />
@@ -575,7 +575,7 @@ export const LobbyView: React.FC<LobbyProps> = ({ onLeave }) => {
                       min="0"
                       max="5"
                       step="1"
-                      value={lobby?.settings.shortTasks || 2}
+                      value={lobby?.settings.shortTasks ?? 2}
                       onChange={(e) => handleUpdateSetting('shortTasks', parseInt(e.target.value))}
                       className="w-full accent-emerald-400"
                     />
@@ -594,7 +594,7 @@ export const LobbyView: React.FC<LobbyProps> = ({ onLeave }) => {
                       min="0"
                       max="120"
                       step="15"
-                      value={lobby?.settings.discussionTime || 15}
+                      value={lobby?.settings.discussionTime ?? 15}
                       onChange={(e) => handleUpdateSetting('discussionTime', parseInt(e.target.value))}
                       className="w-full accent-amber-400"
                     />
@@ -612,7 +612,7 @@ export const LobbyView: React.FC<LobbyProps> = ({ onLeave }) => {
                       min="15"
                       max="300"
                       step="15"
-                      value={lobby?.settings.votingTime || 120}
+                      value={lobby?.settings.votingTime ?? 120}
                       onChange={(e) => handleUpdateSetting('votingTime', parseInt(e.target.value))}
                       className="w-full accent-amber-400"
                     />
@@ -625,7 +625,7 @@ export const LobbyView: React.FC<LobbyProps> = ({ onLeave }) => {
                     <button
                       onClick={() => handleUpdateSetting('fillWithBots', !botFill)}
                       className={`px-3 py-1 rounded-lg font-bold transition-all cursor-pointer ${
-                        botFill ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-400'
+                        botFill ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-300'
                       }`}
                     >
                       {botFill ? 'ON' : 'OFF'}
@@ -642,7 +642,7 @@ export const LobbyView: React.FC<LobbyProps> = ({ onLeave }) => {
                     <button
                       onClick={() => handleUpdateSetting('confirmEjects', !lobby?.settings.confirmEjects)}
                       className={`px-3 py-1 rounded-lg font-bold transition-all cursor-pointer ${
-                        lobby?.settings.confirmEjects ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-400'
+                        lobby?.settings.confirmEjects ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-300'
                       }`}
                     >
                       {lobby?.settings.confirmEjects ? 'ON' : 'OFF'}
@@ -658,7 +658,7 @@ export const LobbyView: React.FC<LobbyProps> = ({ onLeave }) => {
                     <button
                       onClick={() => handleUpdateSetting('visualTasks', !lobby?.settings.visualTasks)}
                       className={`px-3 py-1 rounded-lg font-bold transition-all cursor-pointer ${
-                        lobby?.settings.visualTasks ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-400'
+                        lobby?.settings.visualTasks ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-300'
                       }`}
                     >
                       {lobby?.settings.visualTasks ? 'ON' : 'OFF'}

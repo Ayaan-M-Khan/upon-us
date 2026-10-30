@@ -14,13 +14,16 @@ import {
   VENT_RANGE,
 } from '../../shared/constants';
 import { GAME_STATES } from '../../shared/constants';
-import { GameStateSnapshot, TaskView } from '../../shared/events';
+import { GameStateSnapshot, SabotageType, TaskView } from '../../shared/events';
 import {
   EMERGENCY_BUTTON_POS,
   EMERGENCY_BUTTON_RANGE,
   MAP_VENTS,
+  SABOTAGE_REPAIR_POINTS,
   detectRoom,
+  isFloorAt,
 } from '../../shared/mapData';
+import { findPath } from '../../shared/nav';
 import { resolveWallCollisions } from '../../shared/physics';
 import { net } from '../net';
 import { CameraController } from './cameraController';
@@ -37,6 +40,7 @@ export interface InteractionContext {
   reportBodyId: string | null;
   ventId: string | null;
   emergency: boolean;
+  fixSabotageType: SabotageType | null;
 }
 
 const EMPTY_CONTEXT: InteractionContext = {
@@ -49,6 +53,7 @@ const EMPTY_CONTEXT: InteractionContext = {
   reportBodyId: null,
   ventId: null,
   emergency: false,
+  fixSabotageType: null,
 };
 
 /** Keys that should never be captured while the player is typing in chat, etc. */
@@ -102,8 +107,13 @@ export class GameScene {
   private bodyModels: Map<string, CrewmateModel> = new Map();
   private ghostApplied: Set<string> = new Set();
   private remoteTargets: Map<string, { x: number; z: number; rotation: number; isMoving: boolean }> = new Map();
+  private remotePosSeq: Map<string, number> = new Map();
   private taskMarkerGroup = new THREE.Group();
   private taskMarkerKey = '';
+  private waypointGroup = new THREE.Group();
+  private waypointRing: THREE.Mesh;
+  private waypointTime = 0;
+  private waypointPath: THREE.Line | null = null;
 
   private onRoomChangeCb?: (room: string) => void;
 
@@ -141,6 +151,21 @@ export class GameScene {
     this.map3D = new Map3D();
     this.scene.add(this.map3D.group);
     this.scene.add(this.taskMarkerGroup);
+    this.scene.add(this.waypointGroup);
+    this.waypointRing = new THREE.Mesh(
+      new THREE.TorusGeometry(0.9, 0.1, 8, 24),
+      new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.9 })
+    );
+    this.waypointRing.rotation.x = -Math.PI / 2;
+    this.waypointRing.position.y = 0.08;
+    this.waypointGroup.add(this.waypointRing);
+    const waypointBeam = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.08, 0.3, 2.4, 10, 1, true),
+      new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.35, side: THREE.DoubleSide })
+    );
+    waypointBeam.position.y = 1.25;
+    this.waypointGroup.add(waypointBeam);
+    this.waypointGroup.visible = false;
 
     this.cameraController = new CameraController(this.camera);
     this.bindInputs();
@@ -212,6 +237,33 @@ export class GameScene {
     this.joystickVector = { x, y };
   }
 
+  public setWaypoint(x: number, z: number): void {
+    if (!isFloorAt(x, z)) return;
+    this.waypointGroup.position.set(x, 0, z);
+    this.waypointGroup.visible = true;
+    if (this.waypointPath) {
+      this.scene.remove(this.waypointPath);
+      this.waypointPath.geometry.dispose();
+      (this.waypointPath.material as THREE.Material).dispose();
+    }
+    const route = findPath(this.localPos, { x, z });
+    const points = [this.localPos.clone().setY(0.08), ...route.map((p) => new THREE.Vector3(p.x, 0.08, p.z))];
+    this.waypointPath = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints(points),
+      new THREE.LineDashedMaterial({ color: 0x38bdf8, dashSize: 0.65, gapSize: 0.35, transparent: true, opacity: 0.7 })
+    );
+    this.waypointPath.computeLineDistances();
+    this.scene.add(this.waypointPath);
+  }
+
+  public teleportToVent(ventId: string): void {
+    const vent = MAP_VENTS.find((item) => item.id === ventId);
+    if (!vent) return;
+    this.localPos.set(vent.x, 0, vent.z);
+    this.velocity.set(0, 0);
+    this.isMoving = false;
+  }
+
   // ---------------------------------------------------------------------------
   // Network snapshots
   // ---------------------------------------------------------------------------
@@ -229,6 +281,7 @@ export class GameScene {
         this.playerModels.set(id, model);
         this.scene.add(model.group);
         model.group.position.set(player.x, 0, player.z);
+        if (id !== this.localPlayerId) this.remotePosSeq.set(id, player.posSeq ?? 0);
       } else {
         model.setColor(player.colorId);
         model.setHat(player.hatId);
@@ -244,6 +297,12 @@ export class GameScene {
           this.velocity.set(0, 0);
         }
       } else {
+        const posSeq = player.posSeq ?? 0;
+        const previousPosSeq = this.remotePosSeq.get(id);
+        if (previousPosSeq !== undefined && previousPosSeq !== posSeq) {
+          model.group.position.set(player.x, 0, player.z);
+          this.remotePosSeq.set(id, posSeq);
+        }
         this.remoteTargets.set(id, {
           x: player.x,
           z: player.z,
@@ -259,6 +318,7 @@ export class GameScene {
         model.dispose();
         this.playerModels.delete(id);
         this.remoteTargets.delete(id);
+        this.remotePosSeq.delete(id);
         this.ghostApplied.delete(id);
       }
     }
@@ -286,8 +346,8 @@ export class GameScene {
   }
 
   private updateTaskMarkers(snapshot: GameStateSnapshot): void {
-    const tasks = snapshot.you?.tasks.filter((t) => !t.done) || [];
-    const key = tasks.map((t) => `${t.taskId}:${t.step}`).join('|');
+    const tasks = snapshot.sabotage?.type === 'comms' ? [] : snapshot.you?.tasks.filter((t) => !t.done) || [];
+    const key = `${snapshot.sabotage?.type || ''}:${tasks.map((t) => `${t.taskId}:${t.step}`).join('|')}`;
     if (key === this.taskMarkerKey) return;
     this.taskMarkerKey = key;
 
@@ -341,6 +401,13 @@ export class GameScene {
     }
 
     if (me.isAlive) {
+      if (snap.sabotage && you.role !== 'impostor') {
+        const point = SABOTAGE_REPAIR_POINTS[snap.sabotage.type];
+        if (point && Math.hypot(px - point.x, pz - point.z) <= 2.8) {
+          ctx.fixSabotageType = snap.sabotage.type;
+        }
+      }
+
       let bd = REPORT_RANGE;
       for (const b of snap.bodies || []) {
         const d = Math.hypot(px - b.x, pz - b.z);
@@ -364,6 +431,9 @@ export class GameScene {
             ctx.killTargetId = p.id;
           }
         }
+      }
+
+      if (you.role === 'impostor' || you.role === 'engineer') {
         let vd = VENT_RANGE;
         for (const v of MAP_VENTS) {
           const dist = Math.hypot(px - v.x, pz - v.z);
@@ -512,7 +582,7 @@ export class GameScene {
       const p = snap?.players[id];
 
       const dist = Math.hypot(model.group.position.x - target.x, model.group.position.z - target.z);
-      if (dist > 5) {
+      if (dist > 20) {
         model.group.position.x = target.x;
         model.group.position.z = target.z;
       } else {
@@ -533,9 +603,19 @@ export class GameScene {
 
     // 5. Camera, light, ambience
     this.cameraController.update(delta, this.localPos, this.isMoving);
+    const lightsOut = snap?.sabotage?.type === 'lights';
+    this.keyLight.intensity = THREE.MathUtils.damp(this.keyLight.intensity, lightsOut ? 0.22 : 1.2, 4, delta);
     this.keyLight.position.set(this.localPos.x + 15, 30, this.localPos.z - 10);
     this.keyLight.target.position.set(this.localPos.x, 0, this.localPos.z);
     this.taskMarkerGroup.rotation.y += delta * 0.8;
+    if (this.waypointGroup.visible) {
+      this.waypointTime += delta;
+      this.waypointRing.scale.setScalar(1 + Math.sin(this.waypointTime * 4) * 0.14);
+      if (Math.hypot(this.localPos.x - this.waypointGroup.position.x, this.localPos.z - this.waypointGroup.position.z) < 1.4) {
+        this.waypointGroup.visible = false;
+        if (this.waypointPath) this.waypointPath.visible = false;
+      }
+    }
     this.map3D.update(delta);
 
     this.renderer.render(this.scene, this.camera);
@@ -562,6 +642,15 @@ export class GameScene {
     document.removeEventListener('visibilitychange', this.onVisibility);
     window.removeEventListener('resize', this.onResize);
     this.cameraController.dispose();
+    this.waypointRing.geometry.dispose();
+    (this.waypointRing.material as THREE.Material).dispose();
+    const waypointBeam = this.waypointGroup.children[1] as THREE.Mesh;
+    waypointBeam.geometry.dispose();
+    (waypointBeam.material as THREE.Material).dispose();
+    if (this.waypointPath) {
+      this.waypointPath.geometry.dispose();
+      (this.waypointPath.material as THREE.Material).dispose();
+    }
 
     for (const model of this.playerModels.values()) model.dispose();
     for (const model of this.bodyModels.values()) model.dispose();

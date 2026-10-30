@@ -20,8 +20,8 @@ import {
   ChevronUp,
 } from 'lucide-react';
 import { GAME_STATES } from '../../shared/constants';
-import { GameStateSnapshot } from '../../shared/events';
-import { MAP_BOUNDS, MAP_CORRIDORS, MAP_ROOMS_DETAIL, MAP_VENTS } from '../../shared/mapData';
+import { GameStateSnapshot, SabotageType } from '../../shared/events';
+import { MAP_BOUNDS, MAP_CORRIDORS, MAP_ROOMS_DETAIL, MAP_VENTS, SABOTAGE_REPAIR_POINTS } from '../../shared/mapData';
 import { soundEngine } from '../audio';
 import { net } from '../net';
 import { CameraViewMode } from '../render/cameraController';
@@ -42,6 +42,9 @@ interface GameHudProps {
   onKill: () => void;
   onVent: () => void;
   onVentMove: (ventId: string) => void;
+  onSabotage: (type: SabotageType) => void;
+  onFixSabotage: (type: SabotageType) => void;
+  onSetWaypoint: (x: number, z: number) => void;
   onCancelWork: () => void;
   onJoystick: (x: number, y: number) => void;
   onCameraSettings?: (sensitivityPct: number, headBob: boolean) => void;
@@ -165,6 +168,9 @@ export const GameHud: React.FC<GameHudProps> = ({
   onKill,
   onVent,
   onVentMove,
+  onSabotage,
+  onFixSabotage,
+  onSetWaypoint,
   onCancelWork,
   onJoystick,
   onCameraSettings,
@@ -180,6 +186,8 @@ export const GameHud: React.FC<GameHudProps> = ({
 
   const you = snapshot?.you;
   const isImpostor = you?.role === 'impostor';
+  const isEngineer = you?.role === 'engineer';
+  const canVent = isImpostor || isEngineer;
   const playing = snapshot?.state === GAME_STATES.PLAYING;
   const alive = snapshot?.players[(net.getSocketId() || '')]?.isAlive ?? true;
   const inVent = !!you?.ventId;
@@ -187,6 +195,7 @@ export const GameHud: React.FC<GameHudProps> = ({
   const progress = Math.round((snapshot?.taskProgress || 0) * 100);
   const coarse = typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches;
   const [showSettings, setShowSettings] = useState(false);
+  const [showSabotage, setShowSabotage] = useState(false);
 
   // Settings
   const [sensitivity, setSensitivity] = useState(50);
@@ -208,6 +217,7 @@ export const GameHud: React.FC<GameHudProps> = ({
       if (e.code === 'Escape') {
         setShowMap(false);
         setShowSettings(false);
+        setShowSabotage(false);
       }
     };
 
@@ -216,11 +226,15 @@ export const GameHud: React.FC<GameHudProps> = ({
   }, []);
 
   const workPct = work ? Math.min(100, ((now - work.startedAt) / (work.hold * 1000)) * 100) : 0;
-  const myTasks = you?.tasks || [];
+  const commsJammed = snapshot?.sabotage?.type === 'comms';
+  const myTasks = commsJammed ? [] : you?.tasks || [];
   const cooldownSecs = you ? Math.ceil(you.killCooldownMs / 1000) : 0;
 
   return (
     <div className="absolute inset-0 pointer-events-none select-none z-20 flex flex-col justify-between p-4">
+      {snapshot?.sabotage?.type === 'lights' && (
+        <div className="absolute inset-0 bg-black/25 pointer-events-none" aria-hidden="true" />
+      )}
       {/* TOP BAR */}
       <div className="w-full flex items-start justify-between">
         {/* Left: task progress bar + task list (like the original) */}
@@ -241,7 +255,8 @@ export const GameHud: React.FC<GameHudProps> = ({
             </button>
             {showTasks && (
               <div className="px-3 pb-2 space-y-0.5 text-[12px] font-bold">
-                {myTasks.length === 0 && <div className="text-slate-500">No tasks</div>}
+                {commsJammed && <div className="text-amber-200">Signal lost · task data unavailable</div>}
+                {!commsJammed && myTasks.length === 0 && <div className="text-slate-500">No tasks</div>}
                 {myTasks.map((t) => (
                   <div
                     key={t.taskId}
@@ -260,21 +275,66 @@ export const GameHud: React.FC<GameHudProps> = ({
                 isImpostor ? 'bg-red-950/80 border-red-500 text-red-300' : 'bg-cyan-950/80 border-cyan-500 text-cyan-300'
               }`}
             >
-              {isImpostor ? 'IMPOSTOR' : 'CREWMATE'}
+              {isImpostor ? 'IMPOSTOR' : isEngineer ? 'ENGINEER' : 'CREWMATE'}
               {isImpostor && you.teammates.length > 0 ? ` • with ${you.teammates.map((t) => t.name).join(', ')}` : ''}
             </div>
           )}
         </div>
 
+        {snapshot?.sabotage && (
+          <div className={`absolute top-20 left-1/2 -translate-x-1/2 px-5 py-2 rounded-xl border-2 font-black tracking-widest shadow-xl animate-pulse ${
+            snapshot.sabotage.type === 'reactor' || snapshot.sabotage.type === 'o2'
+              ? 'bg-red-950/95 border-red-500 text-red-200'
+              : 'bg-amber-950/95 border-amber-500 text-amber-100'
+          }`}>
+            {snapshot.sabotage.type.toUpperCase()} SABOTAGE · {snapshot.sabotage.countdown}s
+            {ctx.fixSabotageType && (
+              <button
+                onClick={() => onFixSabotage(ctx.fixSabotageType!)}
+                className="ml-3 px-3 py-1 rounded-lg bg-emerald-500 text-slate-950 text-xs font-black hover:bg-emerald-400"
+              >
+                REPAIR [E]
+              </button>
+            )}
+          </div>
+        )}
+
         {/* Center: room banner */}
         <div className="flex flex-col items-center">
           <div className="bg-slate-900/90 backdrop-blur-md px-6 py-2 rounded-2xl border-2 border-slate-700/90 shadow-2xl flex items-center space-x-2.5">
             <div className="w-3 h-3 rounded-full bg-cyan-400 shadow-[0_0_8px_rgba(56,189,248,0.8)] animate-pulse" />
-            <span className="text-base sm:text-lg font-black tracking-widest uppercase text-transparent bg-clip-text bg-gradient-to-r from-cyan-300 to-sky-100">
+            <span className="text-base sm:text-lg font-black tracking-widest uppercase text-cyan-200">
               {currentRoom}
             </span>
           </div>
         </div>
+
+        {showSabotage && isImpostor && (
+          <div className="absolute right-4 bottom-36 z-40 w-56 p-3 space-y-2 rounded-2xl border-2 border-rose-500 bg-slate-950/95 shadow-2xl pointer-events-auto">
+            <div className="flex items-center justify-between text-xs font-black tracking-widest text-rose-300">
+              SELECT SYSTEM
+              <button onClick={() => setShowSabotage(false)} aria-label="Close sabotage menu"><X className="w-4 h-4" /></button>
+            </div>
+            {([
+              ['reactor', 'REACTOR MELTDOWN', 'Critical · 35s'],
+              ['o2', 'OXYGEN FAILURE', 'Critical · 35s'],
+              ['lights', 'LIGHTS OUT', 'Repair · 20s'],
+              ['comms', 'COMMS JAMMED', 'Repair · 20s'],
+            ] as [SabotageType, string, string][]).map(([type, label, detail]) => (
+              <button
+                key={type}
+                onClick={() => {
+                  onSabotage(type);
+                  setShowSabotage(false);
+                }}
+                className="w-full rounded-xl bg-slate-800 hover:bg-rose-900/80 px-3 py-2 text-left transition-colors"
+              >
+                <span className="block text-xs font-black text-white">{label}</span>
+                <span className="text-[10px] text-slate-200">{detail}</span>
+              </button>
+            ))}
+          </div>
+        )}
 
         {/* Right: Map, camera, settings, exit */}
         <div className="flex items-center space-x-2 pointer-events-auto">
@@ -325,7 +385,11 @@ export const GameHud: React.FC<GameHudProps> = ({
       {inVent && you && (
         <div className="absolute left-1/2 -translate-x-1/2 bottom-32 pointer-events-auto">
           <div className="bg-slate-900/90 border-2 border-slate-500 rounded-2xl p-3 shadow-2xl flex items-center space-x-2">
-            <span className="text-xs font-black text-slate-300 mr-1">IN VENT</span>
+            <span className="text-xs font-black text-slate-300 mr-1">
+              {isEngineer
+                ? `ENGINEER VENT · ${Math.ceil((you.engineerVentTimeLeftMs || 0) / 1000)}s`
+                : 'IN VENT'}
+            </span>
             {you.ventLinks.map((v) => (
               <button
                 key={v.id}
@@ -352,6 +416,7 @@ export const GameHud: React.FC<GameHudProps> = ({
             <div><strong className="text-cyan-300">E / Space:</strong> Use • <strong className="text-cyan-300">R:</strong> Report</div>
             {isImpostor && <div><strong className="text-red-300">Q:</strong> Kill • <strong className="text-red-300">F:</strong> Vent</div>}
             <div><strong className="text-cyan-300">V:</strong> 1st/3rd Person • <strong className="text-cyan-300">Tab / M:</strong> Map</div>
+            {isImpostor && <div><strong className="text-red-300">HUD:</strong> Choose a sabotage system</div>}
           </div>
         </div>
 
@@ -362,9 +427,11 @@ export const GameHud: React.FC<GameHudProps> = ({
               <ActionButton
                 tone="sabotage"
                 label="SABOTAGE"
-                enabled={false}
-                title="Sabotages are not implemented yet"
-                onClick={() => {}}
+                enabled={!!playing && alive && !inVent && !snapshot?.sabotage && (you?.sabotageCooldownMs ?? 0) <= 0}
+                title={(you?.sabotageCooldownMs ?? 0) > 0
+                  ? `Sabotage recharging: ${Math.ceil((you?.sabotageCooldownMs ?? 0) / 1000)}s`
+                  : 'Choose a ship system to sabotage'}
+                onClick={() => setShowSabotage((value) => !value)}
                 icon={<AlertTriangle className="w-7 h-7 mb-0.5" />}
               />
             )}
@@ -378,32 +445,37 @@ export const GameHud: React.FC<GameHudProps> = ({
             />
           </div>
           <div className="flex items-center space-x-3">
-            {isImpostor && (
+            {canVent && (
               <>
                 <ActionButton
                   tone="vent"
                   label={inVent ? 'EXIT' : 'VENT'}
                   hint="[F]"
-                  enabled={!!playing && alive && (inVent || !!ctx.ventId)}
+                  enabled={!!playing && alive && (inVent || (!!ctx.ventId && (isImpostor || (you?.engineerVentCooldownMs ?? 0) <= 0)))}
+                  title={isEngineer && !inVent && (you?.engineerVentCooldownMs ?? 0) > 0
+                    ? `Vent recharging: ${Math.ceil((you?.engineerVentCooldownMs ?? 0) / 1000)}s`
+                    : undefined}
                   onClick={onVent}
                   icon={<Wind className="w-7 h-7 mb-0.5" />}
                 />
-                <ActionButton
-                  tone="kill"
-                  label="KILL"
-                  hint="[Q]"
-                  enabled={!!playing && alive && !inVent && killReady && !!ctx.killTargetId}
-                  badge={!killReady && cooldownSecs > 0 ? String(cooldownSecs) : undefined}
-                  onClick={onKill}
-                  icon={<Skull className="w-7 h-7 mb-0.5" />}
-                />
+                {isImpostor && (
+                  <ActionButton
+                    tone="kill"
+                    label="KILL"
+                    hint="[Q]"
+                    enabled={!!playing && alive && !inVent && killReady && !!ctx.killTargetId}
+                    badge={!killReady && cooldownSecs > 0 ? String(cooldownSecs) : undefined}
+                    onClick={onKill}
+                    icon={<Skull className="w-7 h-7 mb-0.5" />}
+                  />
+                )}
               </>
             )}
             <ActionButton
               tone="use"
-              label={ctx.emergency ? 'EMERGENCY' : 'USE'}
+              label={ctx.fixSabotageType ? 'REPAIR' : ctx.emergency ? 'EMERGENCY' : 'USE'}
               hint="[E]"
-              enabled={!!playing && !inVent && !work && (ctx.emergency || !!ctx.taskId)}
+              enabled={!!playing && !inVent && !work && (ctx.fixSabotageType !== null || ctx.emergency || !!ctx.taskId)}
               onClick={onUse}
               icon={<Hand className="w-7 h-7 mb-0.5" />}
             />
@@ -431,7 +503,34 @@ export const GameHud: React.FC<GameHudProps> = ({
             <div className="relative w-full bg-slate-900/90 rounded-2xl border-2 border-slate-800 p-2 overflow-hidden">
               <svg
                 viewBox={`${MAP_BOUNDS.minX} ${MAP_BOUNDS.minZ} ${MAP_BOUNDS.maxX - MAP_BOUNDS.minX} ${MAP_BOUNDS.maxZ - MAP_BOUNDS.minZ}`}
-                className="w-full h-auto max-h-[70vh]"
+                className="w-full h-auto max-h-[70vh] cursor-crosshair"
+                onClick={(event) => {
+                  const svg = event.currentTarget;
+                  const matrix = svg.getScreenCTM();
+                  if (!matrix) return;
+                  const point = svg.createSVGPoint();
+                  point.x = event.clientX;
+                  point.y = event.clientY;
+                  const local = point.matrixTransform(matrix.inverse());
+                  onSetWaypoint(local.x, local.y);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key !== 'Enter' && event.key !== ' ') return;
+                  const nearestTask = myTasks.reduce<(typeof myTasks)[number] | null>((nearest, task) => {
+                    if (!nearest) return task;
+                    return Math.hypot(task.x - playerPos.x, task.z - playerPos.z) <
+                      Math.hypot(nearest.x - playerPos.x, nearest.z - playerPos.z)
+                      ? task
+                      : nearest;
+                  }, null);
+                  if (nearestTask) {
+                    event.preventDefault();
+                    onSetWaypoint(nearestTask.x, nearestTask.z);
+                  }
+                }}
+                role="button"
+                tabIndex={0}
+                aria-label="Map. Click a location to set a route, or press Enter to route to your nearest task."
               >
                 {MAP_CORRIDORS.map((c) => (
                   <rect
@@ -469,11 +568,22 @@ export const GameHud: React.FC<GameHudProps> = ({
                 ))}
 
                 {/* Impostors can see vents on the map */}
-                {isImpostor &&
-                  MAP_VENTS.map((v) => <rect key={v.id} x={v.x - 0.8} y={v.z - 0.8} width="1.6" height="1.6" fill="#ef4444" opacity="0.9" />)}
+                {canVent &&
+                  MAP_VENTS.map((v) => <rect key={v.id} x={v.x - 0.8} y={v.z - 0.8} width="1.6" height="1.6" fill={isEngineer ? '#fbbf24' : '#ef4444'} opacity="0.9" />)}
+
+                {snapshot?.sabotage && (
+                  <circle
+                    cx={SABOTAGE_REPAIR_POINTS[snapshot.sabotage.type].x}
+                    cy={SABOTAGE_REPAIR_POINTS[snapshot.sabotage.type].z}
+                    r="1.5"
+                    fill="#fb7185"
+                    stroke="#fff"
+                    strokeWidth="0.4"
+                  />
+                )}
 
                 {/* Task locations (yellow) */}
-                {myTasks
+                {!commsJammed && myTasks
                   .filter((t) => !t.done)
                   .map((t) => (
                     <g key={t.taskId}>
@@ -492,9 +602,9 @@ export const GameHud: React.FC<GameHudProps> = ({
               <div className="flex items-center space-x-4">
                 <span className="flex items-center space-x-1.5"><span className="w-3 h-3 rounded-full bg-white inline-block" /><span className="font-bold text-white">You</span></span>
                 <span className="flex items-center space-x-1.5"><span className="w-3 h-3 rounded-full bg-yellow-400 inline-block" /><span className="font-bold text-yellow-300">Task</span></span>
-                {isImpostor && <span className="flex items-center space-x-1.5"><span className="w-3 h-3 bg-red-500 inline-block" /><span className="font-bold text-red-300">Vent</span></span>}
+                {canVent && <span className="flex items-center space-x-1.5"><span className={`w-3 h-3 inline-block ${isEngineer ? 'bg-amber-400' : 'bg-red-500'}`} /><span className={`font-bold ${isEngineer ? 'text-amber-200' : 'text-red-300'}`}>Vent</span></span>}
               </div>
-              <span>Press [Tab] or [M] to close</span>
+              <span>Click a room to set a route · [Tab] or [M] to close</span>
             </div>
           </div>
         </div>
@@ -535,7 +645,7 @@ export const GameHud: React.FC<GameHudProps> = ({
                 <button
                   onClick={() => setHeadBob(!headBob)}
                   className={`px-3 py-1 rounded-lg font-bold transition-all cursor-pointer ${
-                    headBob ? 'bg-cyan-600 text-white' : 'bg-slate-800 text-slate-400'
+                    headBob ? 'bg-cyan-600 text-white' : 'bg-slate-800 text-slate-300'
                   }`}
                 >
                   {headBob ? 'ENABLED' : 'DISABLED'}

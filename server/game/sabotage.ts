@@ -2,7 +2,9 @@
  * Impostor Protocol - Sabotage System
  */
 
-export type SabotageType = 'reactor' | 'o2' | 'lights' | 'comms' | 'doors';
+import type { SabotageType } from '../../shared/events';
+
+export type { SabotageType };
 
 export interface ActiveSabotage {
   type: SabotageType;

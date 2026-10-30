@@ -6,7 +6,8 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { GAME_STATES, GameSettings } from '../../shared/constants';
-import { GameOverInfo, GameStateSnapshot } from '../../shared/events';
+import { GameOverInfo, GameStateSnapshot, SabotageType } from '../../shared/events';
+import { soundEngine } from '../audio';
 import { net } from '../net';
 import { CameraViewMode } from '../render/cameraController';
 import { GameScene, InteractionContext } from '../render/gameScene';
@@ -29,6 +30,7 @@ const EMPTY_CTX: InteractionContext = {
   reportBodyId: null,
   ventId: null,
   emergency: false,
+  fixSabotageType: null,
 };
 
 export interface WorkState {
@@ -51,6 +53,7 @@ export const GameView: React.FC<GameViewProps> = ({ settings, onLeave }) => {
   const [cameraMode, setCameraMode] = useState<CameraViewMode>('third_person');
   const [playerPos, setPlayerPos] = useState<{ x: number; z: number }>({ x: 0, z: -22 });
   const [snapshot, setSnapshot] = useState<GameStateSnapshot | null>(null);
+  const sabotageActive = !!snapshot?.sabotage;
   const [ctx, setCtx] = useState<InteractionContext>(EMPTY_CTX);
   const [work, setWork] = useState<WorkState | null>(null);
   const [gameOver, setGameOver] = useState<GameOverInfo | null>(null);
@@ -58,6 +61,11 @@ export const GameView: React.FC<GameViewProps> = ({ settings, onLeave }) => {
   workRef.current = work;
 
   const socketId = net.getSocketId() || '';
+
+  useEffect(() => {
+    soundEngine.setSabotageAlarm(sabotageActive);
+    return () => soundEngine.setSabotageAlarm(false);
+  }, [sabotageActive]);
 
   useEffect(() => {
     if (!mountRef.current) return;
@@ -121,6 +129,10 @@ export const GameView: React.FC<GameViewProps> = ({ settings, onLeave }) => {
   // ---- Actions ----
   const doUse = useCallback(() => {
     if (!playing || !you || you.ventId) return;
+    if (ctx.fixSabotageType) {
+      net.fixSabotage(ctx.fixSabotageType);
+      return;
+    }
     if (ctx.emergency) {
       net.callEmergency();
       return;
@@ -139,6 +151,10 @@ export const GameView: React.FC<GameViewProps> = ({ settings, onLeave }) => {
     }
   }, [playing, you, ctx]);
 
+  const doSabotage = useCallback((type: SabotageType) => {
+    if (playing && you?.role === 'impostor' && !you.ventId) net.startSabotage(type);
+  }, [playing, you]);
+
   const doReport = useCallback(() => {
     if (playing && ctx.reportBodyId) net.reportBody(ctx.reportBodyId);
   }, [playing, ctx.reportBodyId]);
@@ -148,7 +164,7 @@ export const GameView: React.FC<GameViewProps> = ({ settings, onLeave }) => {
   }, [playing, you, ctx.killTargetId]);
 
   const doVent = useCallback(() => {
-    if (!playing || !you || you.role !== 'impostor') return;
+    if (!playing || !you || (you.role !== 'impostor' && you.role !== 'engineer')) return;
     soundEngine.playVentClank();
     if (you.ventId) {
       net.ventExit();
@@ -251,6 +267,9 @@ export const GameView: React.FC<GameViewProps> = ({ settings, onLeave }) => {
         onKill={doKill}
         onVent={doVent}
         onVentMove={handleVentMove}
+        onSabotage={doSabotage}
+        onFixSabotage={(type) => net.fixSabotage(type)}
+        onSetWaypoint={(x, z) => sceneRef.current?.setWaypoint(x, z)}
         onCancelWork={() => stopWork(true)}
         onJoystick={handleJoystick}
         onCameraSettings={handleCameraSettings}

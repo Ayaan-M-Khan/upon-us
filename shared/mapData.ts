@@ -253,6 +253,13 @@ export const SPAWN_RADIUS = 4;
 export const EMERGENCY_BUTTON_POS = { x: 0, z: -18 };
 export const EMERGENCY_BUTTON_RANGE = 3.2;
 
+export const SABOTAGE_REPAIR_POINTS: Record<string, { x: number; z: number }> = {
+  reactor: { x: -40, z: 0 },
+  o2: { x: 24, z: -9 },
+  lights: { x: -20, z: 17 },
+  comms: { x: 21, z: 24 },
+};
+
 export function getSpawnPosition(playerIndex: number, totalPlayers: number = 10): { x: number; z: number } {
   const angle = (playerIndex / Math.max(totalPlayers, 1)) * Math.PI * 2;
   return {
