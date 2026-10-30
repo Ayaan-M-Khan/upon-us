@@ -6,7 +6,7 @@
     user-select: none;
     -webkit-user-select: none;
     overflow: hidden;
-    background-color: #0b0e14;
+    background-color: #05070e;
     color: #e2e8f0;
   }
 }
@@ -21,14 +21,35 @@
   border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(59, 130, 246, 0.4);
+  background: rgba(56, 189, 248, 0.4);
   border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(59, 130, 246, 0.7);
+  background: rgba(56, 189, 248, 0.7);
 }
 
-/* Starfield canvas overlay */
-.starfield-bg {
-  background: radial-gradient(ellipse at bottom, #1B2735 0%, #090A0F 100%);
+/* Space Background & Cosmic Animations */
+.space-theme-bg {
+  background: radial-gradient(circle at 50% 20%, #0d1933 0%, #080d1e 45%, #03050c 100%);
 }
+
+@keyframes twinkle {
+  0%, 100% { opacity: 0.2; transform: scale(0.8); }
+  50% { opacity: 0.95; transform: scale(1.2); }
+}
+
+@keyframes floatDust {
+  0% { transform: translateY(0px) translateX(0px); }
+  50% { transform: translateY(-12px) translateX(8px); }
+  100% { transform: translateY(0px) translateX(0px); }
+}
+
+@keyframes scanline {
+  0% { transform: translateY(-100%); }
+  100% { transform: translateY(1000%); }
+}
+
+.animate-twinkle-1 { animation: twinkle 3s ease-in-out infinite; }
+.animate-twinkle-2 { animation: twinkle 4.5s ease-in-out infinite 1.5s; }
+.animate-twinkle-3 { animation: twinkle 6s ease-in-out infinite 0.7s; }
+.animate-float-dust { animation: floatDust 12s ease-in-out infinite; }

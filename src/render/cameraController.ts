@@ -4,18 +4,22 @@
  */
 
 import * as THREE from 'three';
-import { lineIntersectsWalls } from '../../shared/physics';
+import { SecurityCamera } from '../../shared/mapData';
 
-export type CameraViewMode = 'third_person' | 'first_person';
+export type CameraViewMode = 'third_person' | 'first_person' | 'cctv';
 
 export class CameraController {
   public camera: THREE.PerspectiveCamera;
   public mode: CameraViewMode = 'third_person';
+  public cctvCamera: SecurityCamera | null = null;
+
+  // Fixed top-down perspective pitch (~62 degrees down look)
+  public static readonly FIXED_TOP_DOWN_PITCH: number = 1.08;
 
   // Orbit angles & distance
   public angleH: number = 0; // horizontal yaw
-  public angleV: number = 0.42; // vertical pitch (~24 degrees)
-  public distance: number = 5.8;
+  public angleV: number = CameraController.FIXED_TOP_DOWN_PITCH; // vertical pitch locked to top-down view
+  public distance: number = 8.6; // elevated overview of rooms and character
 
   // Settings
   public sensitivity: number = 0.005;
@@ -34,6 +38,11 @@ export class CameraController {
 
   public toggleViewMode(): CameraViewMode {
     this.mode = this.mode === 'third_person' ? 'first_person' : 'third_person';
+    if (this.mode === 'third_person') {
+      this.angleV = CameraController.FIXED_TOP_DOWN_PITCH;
+    } else {
+      this.angleV = 0;
+    }
     return this.mode;
   }
 
@@ -73,7 +82,7 @@ export class CameraController {
 
   private onWheel = (e: WheelEvent): void => {
     if (this.mode === 'third_person') {
-      this.distance = Math.max(3.0, Math.min(8.5, this.distance + e.deltaY * 0.005));
+      this.distance = Math.max(5.0, Math.min(13.5, this.distance + e.deltaY * 0.006));
     }
   };
 
@@ -98,9 +107,11 @@ export class CameraController {
   }
 
   public rotate(dx: number, dy: number): void {
+    // Only mouse horizontal direction changes the yaw around the character
     this.angleH -= dx * this.sensitivity;
     if (this.mode === 'third_person') {
-      this.angleV = Math.max(0.1, Math.min(1.2, this.angleV + dy * this.sensitivity));
+      // Always maintain fixed top-down view angle
+      this.angleV = CameraController.FIXED_TOP_DOWN_PITCH;
     } else {
       // First person pitch (-60 to +60 degrees)
       this.angleV = Math.max(-1.1, Math.min(1.1, this.angleV - dy * this.sensitivity));
@@ -116,6 +127,18 @@ export class CameraController {
     targetPos: THREE.Vector3,
     isMoving: boolean
   ): void {
+    if (this.mode === 'cctv' && this.cctvCamera) {
+      // Security CCTV Surveillance Camera View
+      const cam = this.cctvCamera;
+      this.camera.position.x = THREE.MathUtils.damp(this.camera.position.x, cam.x, 24, delta);
+      this.camera.position.y = THREE.MathUtils.damp(this.camera.position.y, cam.y, 24, delta);
+      this.camera.position.z = THREE.MathUtils.damp(this.camera.position.z, cam.z, 24, delta);
+
+      const lookTarget = new THREE.Vector3(cam.lookAt.x, cam.lookAt.y, cam.lookAt.z);
+      this.camera.lookAt(lookTarget);
+      return;
+    }
+
     if (this.mode === 'first_person') {
       // First person eye level (~1.15m above ground)
       let eyeY = targetPos.y + 1.15;
@@ -154,13 +177,9 @@ export class CameraController {
       const sinH = Math.sin(this.angleH);
       const cosH = Math.cos(this.angleH);
 
-      const idealX = this.focus.x + sinH * cosV * this.distance;
-      const idealZ = this.focus.z + cosH * cosV * this.distance;
-      const wallCheck = lineIntersectsWalls(this.focus.x, this.focus.z, idealX, idealZ);
-      const allowed = wallCheck.hit ? Math.max(1.2, this.distance * wallCheck.distanceRatio * 0.88) : this.distance;
-
-      if (allowed < this.effDist) this.effDist = allowed;
-      else this.effDist = THREE.MathUtils.damp(this.effDist, allowed, 5, delta);
+      // In top-down view (~62° elevation, height ~8m), the camera sits well above 2.8m interior walls.
+      // We smoothly track distance without ground-level wall raycasts so the camera never zooms in unexpectedly.
+      this.effDist = THREE.MathUtils.damp(this.effDist, this.distance, 14, delta);
 
       this.camera.position.set(
         this.focus.x + sinH * cosV * this.effDist,

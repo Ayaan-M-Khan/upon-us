@@ -30,6 +30,8 @@ export const EVENTS = {
   CHAT_MESSAGE: 'chatMessage',
   CAST_VOTE: 'castVote',
   REJOIN: 'rejoin',
+  VOICE_STREAM: 'voiceStream',
+  VOICE_STATE: 'voiceState',
 
   // Server -> Client
   LOBBY_STATE: 'lobbyState',
@@ -52,6 +54,8 @@ export const EVENTS = {
   GAME_OVER: 'gameOver',
   ERROR_MESSAGE: 'errorMessage',
   VOTE_CAST_ACK: 'voteCastAck',
+  VOICE_RELAY: 'voiceRelay',
+  VOICE_STATE_RELAY: 'voiceStateRelay',
 } as const;
 
 export type Role = 'crewmate' | 'impostor';
@@ -119,6 +123,28 @@ export interface BodyView {
   z: number;
 }
 
+export type SabotageType = 'reactor' | 'o2' | 'lights' | 'comms' | 'doors';
+
+export interface SabotagePartState {
+  id: number;
+  name: string;
+  room: string;
+  x: number;
+  z: number;
+  resolved: boolean;
+}
+
+export interface SabotageStateView {
+  type: SabotageType;
+  room?: string;
+  remainingSecs: number;
+  totalSecs: number;
+  parts: SabotagePartState[];
+  isCritical: boolean;
+  lightsOut?: boolean;
+  commsDisabled?: boolean;
+}
+
 export interface MeetingResults {
   votes: { voterId: string; targetId: string }[]; // empty when anonymous votes are on
   tally: Record<string, number>; // targetId | 'skip' -> count
@@ -134,8 +160,11 @@ export interface MeetingView {
   phase: 'INTRO' | 'DISCUSSION' | 'VOTING' | 'RESULTS' | 'EJECTION';
   remainingMs: number;
   callerName: string;
+  callerColorId?: string;
   reason: 'body' | 'emergency';
   bodyColorId?: string;
+  bodyVictimName?: string;
+  bodyRoom?: string;
   voted: string[];
   results?: MeetingResults;
 }
@@ -149,6 +178,7 @@ export interface YouView {
   emergencyCooldownMs: number;
   ventId: string | null;
   ventLinks: { id: string; x: number; z: number }[];
+  sabotageCooldownSecs?: number;
 }
 
 export interface ChatMessage {
@@ -175,4 +205,6 @@ export interface GameStateSnapshot {
   taskProgress?: number; // 0..1
   you?: YouView;
   winner?: 'crewmates' | 'impostors';
+  sabotage?: SabotageStateView | null;
+  doorLocks?: string[];
 }

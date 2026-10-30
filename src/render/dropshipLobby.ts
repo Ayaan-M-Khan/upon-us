@@ -330,6 +330,11 @@ export class DropshipLobbyScene {
     this.joystickVector = { x: 0, y: 0 };
     this.isPointerDown = false;
   };
+  private onBlur = (): void => {
+    if (typeof document !== 'undefined' && document.hidden) {
+      this.clearKeys();
+    }
+  };
   private onPointerDown = (e: PointerEvent): void => {
     this.isPointerDown = true;
     this.lastPointerX = e.clientX;
@@ -358,8 +363,8 @@ export class DropshipLobbyScene {
   private bindInputs(): void {
     window.addEventListener('keydown', this.onKeyDown);
     window.addEventListener('keyup', this.onKeyUp);
-    window.addEventListener('blur', this.clearKeys);
-    document.addEventListener('visibilitychange', this.clearKeys);
+    window.addEventListener('blur', this.onBlur);
+    document.addEventListener('visibilitychange', this.onBlur);
     this.renderer.domElement.addEventListener('pointerdown', this.onPointerDown);
     window.addEventListener('pointermove', this.onPointerMove);
     window.addEventListener('pointerup', this.onPointerUp);

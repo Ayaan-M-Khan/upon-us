@@ -36,6 +36,7 @@ import {
   MeetingView,
   PlayerSnapshot,
   Role,
+  SabotageType,
   TaskView,
   YouView,
 } from '../../shared/events';
@@ -48,8 +49,9 @@ import {
   getSpawnPosition,
 } from '../../shared/mapData';
 import { findPath } from '../../shared/nav';
-import { lineIntersectsWalls, resolveWallCollisions } from '../../shared/physics';
+import { lineIntersectsWalls, resolveMovementCollisions, resolveWallCollisions } from '../../shared/physics';
 import { assignRoles } from './roles';
+import { SabotageManager } from './sabotage';
 import { GameStateMachine } from './stateMachine';
 import { ALL_TASKS, TaskDefinition, pickCommonTasks, pickPersonalTasks } from './tasks';
 
@@ -101,8 +103,10 @@ interface Meeting {
   endsAt: number;
   callerId: string;
   callerName: string;
+  callerColorId?: string;
   reason: 'body' | 'emergency';
   bodyColorId?: string;
+  bodyVictimName?: string;
   bodyRoom?: string;
   votes: Map<string, string>;
   results?: MeetingResults;
@@ -117,6 +121,7 @@ export class GameRoom {
 
   private bodies: Map<string, Body> = new Map();
   private meeting: Meeting | null = null;
+  private sabotageManager = new SabotageManager();
   private phaseEndsAt = 0;
   private emergencyReadyAt = 0;
   private winner: 'crewmates' | 'impostors' | null = null;
@@ -370,6 +375,35 @@ export class GameRoom {
     this.broadcastChat(p, text);
   }
 
+  public triggerSabotage(playerId: string, type: SabotageType, room?: string): boolean {
+    const p = this.players.get(playerId);
+    if (!p || p.role !== 'impostor' || !p.isAlive || this.stateMachine.currentState !== GAME_STATES.PLAYING) {
+      return false;
+    }
+    const success = this.sabotageManager.triggerSabotage(type, room);
+    if (success) {
+      this.io.to(this.code).emit(EVENTS.SABOTAGE_STARTED, { type, room });
+    }
+    return success;
+  }
+
+  public fixSabotage(playerId: string, partId?: number): boolean {
+    const p = this.players.get(playerId);
+    if (!p || !p.isAlive || this.stateMachine.currentState !== GAME_STATES.PLAYING) {
+      return false;
+    }
+    const id = partId ?? 1;
+    const success = this.sabotageManager.fixPart(id, { x: p.x, z: p.z });
+    if (success) {
+      if (!this.sabotageManager.getActiveSabotage()) {
+        this.io.to(this.code).emit(EVENTS.SABOTAGE_RESOLVED);
+      } else {
+        this.io.to(this.code).emit(EVENTS.SABOTAGE_UPDATED, { partId: id });
+      }
+    }
+    return success;
+  }
+
   public destroy(): void {
     if (this.tickInterval) {
       clearInterval(this.tickInterval);
@@ -402,11 +436,17 @@ export class GameRoom {
           for (const p of this.players.values()) p.lastInputAt = now;
         }
         break;
-      case GAME_STATES.PLAYING:
+      case GAME_STATES.PLAYING: {
+        const sabResult = this.sabotageManager.tick(now);
+        if (sabResult.criticalTimeout) {
+          this.endGame('impostors', sabResult.reason || 'Critical sabotage succeeded!');
+          return;
+        }
         for (const p of [...this.players.values()]) {
           if (p.isBot && this.stateMachine.currentState === GAME_STATES.PLAYING) this.botUpdate(p, now, dt);
         }
         break;
+      }
       case GAME_STATES.MEETING:
         this.advanceMeeting(now);
         break;
@@ -458,6 +498,8 @@ export class GameRoom {
         taskProgress,
         you: this.youView(human, now),
         winner: this.winner || undefined,
+        sabotage: this.sabotageManager.getView(now),
+        doorLocks: this.sabotageManager.getLockedRooms(now),
       };
       this.io.to(human.id).emit(EVENTS.STATE_SNAPSHOT, snapshot);
     }
@@ -547,7 +589,31 @@ export class GameRoom {
       }
     }
 
-    this.io.to(this.code).emit(EVENTS.PLAYER_KILLED, { victimId: victim.id });
+    const killPayload = {
+      victimId: victim.id,
+      killerId: killer.id,
+      x: victim.x,
+      z: victim.z,
+    };
+
+    // 1. Killer and victim always receive it
+    this.io.to(killer.id).emit(EVENTS.PLAYER_KILLED, killPayload);
+    this.io.to(victim.id).emit(EVENTS.PLAYER_KILLED, killPayload);
+
+    // 2. Only notify players who actually have line of sight to witness the kill
+    const vRoom = detectRoom(victim.x, victim.z);
+    for (const human of this.humans()) {
+      if (human.id === killer.id || human.id === victim.id) continue;
+      const dist = Math.hypot(human.x - victim.x, human.z - victim.z);
+      const hRoom = detectRoom(human.x, human.z);
+      const maxRange = hRoom === vRoom ? 12 : 8.5;
+      const canSee =
+        (!human.isAlive && dist < 15) ||
+        (dist <= maxRange && !lineIntersectsWalls(human.x, human.z, victim.x, victim.z).hit);
+      if (canSee) {
+        this.io.to(human.id).emit(EVENTS.PLAYER_KILLED, killPayload);
+      }
+    }
     this.checkWin();
   }
 
@@ -558,13 +624,17 @@ export class GameRoom {
   private startMeeting(caller: GamePlayer, reason: 'body' | 'emergency', body?: Body): void {
     if (this.meeting || this.stateMachine.currentState !== GAME_STATES.PLAYING) return;
     const now = Date.now();
+    this.sabotageManager.clearOnMeeting(now);
+    const victimPlayer = body ? this.players.get(body.id) : undefined;
     this.meeting = {
       phase: 'INTRO',
       endsAt: now + MEETING_INTRO_MS,
       callerId: caller.id,
       callerName: caller.name,
+      callerColorId: caller.colorId,
       reason,
       bodyColorId: body?.colorId,
+      bodyVictimName: victimPlayer?.name,
       bodyRoom: body?.room,
       votes: new Map(),
     };
@@ -722,8 +792,11 @@ export class GameRoom {
       phase: m.phase,
       remainingMs: Math.max(0, m.endsAt - now),
       callerName: m.callerName,
+      callerColorId: m.callerColorId,
       reason: m.reason,
       bodyColorId: m.bodyColorId,
+      bodyVictimName: m.bodyVictimName,
+      bodyRoom: m.bodyRoom,
       voted: [...m.votes.keys()],
       results: m.results,
     };
@@ -818,6 +891,7 @@ export class GameRoom {
             return { id: v.id, x: v.x, z: v.z };
           })
         : [],
+      sabotageCooldownSecs: p.role === 'impostor' ? this.sabotageManager.getCooldownRemainingSecs(now) : undefined,
     };
   }
 
@@ -875,7 +949,7 @@ export class GameRoom {
       let nx = bot.x + (dx / d) * step;
       let nz = bot.z + (dz / d) * step;
       if (bot.isAlive) {
-        const r = resolveWallCollisions(nx, nz);
+        const r = resolveMovementCollisions(bot.x, bot.z, nx, nz);
         nx = r.x;
         nz = r.z;
       }
@@ -895,12 +969,12 @@ export class GameRoom {
     if (this.stateMachine.currentState !== GAME_STATES.PLAYING) return; // a meeting or game over just started
     this.botMove(bot, dt);
 
-    // Un-stick: if we should be walking but haven't moved, replan.
+    // Un-stick: if we should be walking but haven't moved, replan promptly.
     if (b.path.length && b.mode !== 'work') {
       if (Math.hypot(bot.x - b.lastPos.x, bot.z - b.lastPos.z) > 0.4) {
         b.lastPos = { x: bot.x, z: bot.z };
         b.stuckSince = now;
-      } else if (now - b.stuckSince > 2500 && b.goal) {
+      } else if (now - b.stuckSince > 1200 && b.goal) {
         b.stuckSince = now;
         this.setGoal(bot, b.goal);
       }
@@ -990,6 +1064,32 @@ export class GameRoom {
         b.mode = 'idle';
         b.targetId = null;
         b.path = [];
+      }
+    }
+
+    // --- 2.5 Sabotage response (crewmate bots repair, impostor bots trigger) ---
+    const activeSab = this.sabotageManager.getActiveSabotage();
+    if (activeSab && bot.isAlive && bot.role === 'crewmate') {
+      const part = activeSab.parts.find((p) => !p.resolved);
+      if (part) {
+        const dist = Math.hypot(bot.x - part.x, bot.z - part.z);
+        if (dist <= 2.2) {
+          this.fixSabotage(bot.id, part.id);
+          b.mode = 'idle';
+          b.waitUntil = now + 1200;
+          return;
+        } else if (b.mode !== 'task' || !b.goal || Math.hypot(b.goal.x - part.x, b.goal.z - part.z) > 1.5) {
+          b.mode = 'task';
+          b.currentTask = null;
+          this.setGoal(bot, { x: part.x, z: part.z });
+          return;
+        }
+      }
+    } else if (!activeSab && bot.isAlive && bot.role === 'impostor' && this.sabotageManager.getCooldownRemainingSecs(now) === 0) {
+      if (Math.random() < 0.04) {
+        const types: SabotageType[] = ['reactor', 'o2', 'lights', 'comms'];
+        const chosen = types[Math.floor(Math.random() * types.length)];
+        this.triggerSabotage(bot.id, chosen);
       }
     }
 
