@@ -12,7 +12,6 @@ export interface TaskStepDef {
   spot: number; // 0-3, see getRoomSpot
   hold: number; // seconds
 }
-
 export interface TaskDefinition {
   id: string;
   name: string;
@@ -48,6 +47,21 @@ export const ALL_TASKS: TaskDefinition[] = [
   { id: 'inspect_sample', name: 'Inspect Sample', type: 'long', steps: [S('Medbay', 0, 5), S('Medbay', 1, 5)] },
 ];
 
+const DOWNLOAD_ROOMS: TaskStepDef[] = [
+  S('Weapons', 0, 5),
+  S('Cafeteria', 1, 5),
+  S('Navigation', 0, 5),
+  S('Electrical', 2, 5),
+];
+
+const WIRING_ROOMS: TaskStepDef[] = [
+  S('Electrical', 1, 3),
+  S('Storage', 0, 3),
+  S('Admin', 3, 3),
+  S('Navigation', 2, 3),
+  S('Cafeteria', 2, 3),
+];
+
 export function shuffle<T>(arr: T[]): T[] {
   const a = [...arr];
   for (let i = a.length - 1; i > 0; i--) {
@@ -57,13 +71,31 @@ export function shuffle<T>(arr: T[]): T[] {
   return a;
 }
 
-/** Pick common tasks once (shared by everyone), then a random short/long set per player. */
+/** Pick common tasks once (shared by everyone), with randomized wiring steps if present. */
 export function pickCommonTasks(count: number): TaskDefinition[] {
-  return shuffle(ALL_TASKS.filter((t) => t.type === 'common')).slice(0, count);
+  const pool = ALL_TASKS.filter((t) => t.type === 'common');
+  const picked = shuffle(pool).slice(0, count);
+  return picked.map((task) => {
+    if (task.id === 'fix_wiring') {
+      const steps = shuffle(WIRING_ROOMS).slice(0, 3);
+      return { ...task, steps };
+    }
+    return { ...task, steps: [...task.steps] };
+  });
 }
 
+/** Pick a random short/long set per player, with randomized download stations. */
 export function pickPersonalTasks(shortCount: number, longCount: number): TaskDefinition[] {
   const shorts = shuffle(ALL_TASKS.filter((t) => t.type === 'short')).slice(0, shortCount);
   const longs = shuffle(ALL_TASKS.filter((t) => t.type === 'long')).slice(0, longCount);
-  return [...shorts, ...longs];
+  return [...shorts, ...longs].map((task) => {
+    if (task.id === 'download_data') {
+      const source = DOWNLOAD_ROOMS[Math.floor(Math.random() * DOWNLOAD_ROOMS.length)];
+      return {
+        ...task,
+        steps: [source, S('Admin', 1, 5)],
+      };
+    }
+    return { ...task, steps: [...task.steps] };
+  });
 }

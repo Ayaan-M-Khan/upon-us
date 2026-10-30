@@ -7,12 +7,13 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { GAME_STATES, GameSettings } from '../../shared/constants';
 import { GameOverInfo, GameStateSnapshot, SabotageType } from '../../shared/events';
-import { soundEngine } from '../audio';
 import { net } from '../net';
+import { soundEngine } from '../audio';
 import { CameraViewMode } from '../render/cameraController';
 import { GameScene, InteractionContext } from '../render/gameScene';
 import { GameHud } from './gameHud';
 import { GameOverOverlay, MeetingOverlay, RoleReveal } from './gameOverlays';
+import { CommsFixGame, LightsFixGame, O2FixGame, ReactorFixGame } from './sabotageGames';
 import { TaskGame } from './taskGames';
 
 interface GameViewProps {
@@ -30,7 +31,9 @@ const EMPTY_CTX: InteractionContext = {
   reportBodyId: null,
   ventId: null,
   emergency: false,
-  fixSabotageType: null,
+  canUseCameras: false,
+  sabotagePartId: null,
+  sabotageType: null,
 };
 
 export interface WorkState {
@@ -56,6 +59,10 @@ export const GameView: React.FC<GameViewProps> = ({ settings, onLeave }) => {
   const sabotageActive = !!snapshot?.sabotage;
   const [ctx, setCtx] = useState<InteractionContext>(EMPTY_CTX);
   const [work, setWork] = useState<WorkState | null>(null);
+  const [showHitboxes, setShowHitboxes] = useState<boolean>(false);
+  const [isViewingCameras, setIsViewingCameras] = useState<boolean>(false);
+  const [activeCameraIndex, setActiveCameraIndex] = useState<number>(0);
+  const [activeSabotageGame, setActiveSabotageGame] = useState<{ partId: number; type: SabotageType } | null>(null);
   const [gameOver, setGameOver] = useState<GameOverInfo | null>(null);
   const workRef = useRef<WorkState | null>(null);
   workRef.current = work;
@@ -109,6 +116,7 @@ export const GameView: React.FC<GameViewProps> = ({ settings, onLeave }) => {
   const completeWork = useCallback(() => {
     const w = workRef.current;
     if (!w) return;
+    soundEngine.playTaskComplete();
     const wait = Math.max(0, w.hold * 1000 - (performance.now() - w.startedAt) + 150);
     window.setTimeout(() => {
       net.completeTaskStep(w.taskId);
@@ -126,15 +134,47 @@ export const GameView: React.FC<GameViewProps> = ({ settings, onLeave }) => {
   const me = snapshot?.players[socketId];
   const playing = snapshot?.state === GAME_STATES.PLAYING;
 
+  const handleToggleSecurityCameras = useCallback(() => {
+    if (!sceneRef.current) return;
+    const next = sceneRef.current.toggleSecurityCameras();
+    setIsViewingCameras(next);
+  }, []);
+
+  const handleSelectCameraFeed = useCallback((idx: number) => {
+    if (!sceneRef.current) return;
+    sceneRef.current.setSecurityCameraFeed(idx);
+    setActiveCameraIndex(idx);
+  }, []);
+
+  useEffect(() => {
+    if (isViewingCameras && snapshot && snapshot.state !== GAME_STATES.PLAYING) {
+      sceneRef.current?.toggleSecurityCameras(false);
+      setIsViewingCameras(false);
+    }
+    if (activeSabotageGame && snapshot && snapshot.state !== GAME_STATES.PLAYING) {
+      setActiveSabotageGame(null);
+    }
+  }, [snapshot, isViewingCameras, activeSabotageGame]);
+
+  const handleRepairSabotage = useCallback(() => {
+    if (ctx.sabotagePartId && ctx.sabotageType) {
+      setActiveSabotageGame({ partId: ctx.sabotagePartId, type: ctx.sabotageType });
+    }
+  }, [ctx.sabotagePartId, ctx.sabotageType]);
+
   // ---- Actions ----
   const doUse = useCallback(() => {
     if (!playing || !you || you.ventId) return;
-    if (ctx.fixSabotageType) {
-      net.fixSabotage(ctx.fixSabotageType);
+    if (ctx.sabotagePartId && ctx.sabotageType) {
+      handleRepairSabotage();
       return;
     }
     if (ctx.emergency) {
       net.callEmergency();
+      return;
+    }
+    if (ctx.canUseCameras) {
+      handleToggleSecurityCameras();
       return;
     }
     if (ctx.taskId && !workRef.current) {
@@ -149,11 +189,7 @@ export const GameView: React.FC<GameViewProps> = ({ settings, onLeave }) => {
       });
       if (sceneRef.current) sceneRef.current.movementLocked = true;
     }
-  }, [playing, you, ctx]);
-
-  const doSabotage = useCallback((type: SabotageType) => {
-    if (playing && you?.role === 'impostor' && !you.ventId) net.startSabotage(type);
-  }, [playing, you]);
+  }, [playing, you, ctx, handleRepairSabotage, handleToggleSecurityCameras]);
 
   const doReport = useCallback(() => {
     if (playing && ctx.reportBodyId) net.reportBody(ctx.reportBodyId);
@@ -181,12 +217,48 @@ export const GameView: React.FC<GameViewProps> = ({ settings, onLeave }) => {
     net.ventMove(destId);
   }, [playing, you]);
 
+  const handleToggleHitboxes = useCallback(() => {
+    if (sceneRef.current) {
+      const active = sceneRef.current.toggleWireframeHitboxes();
+      setShowHitboxes(active);
+    }
+  }, []);
+
+  const handleToggleCamera = useCallback(() => {
+    if (sceneRef.current) setCameraMode(sceneRef.current.cameraController.toggleViewMode());
+  }, []);
+
   // ---- Keyboard shortcuts ----
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement | null;
       if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) return;
       if (e.repeat) return;
+
+      // In CCTV surveillance camera view
+      if (isViewingCameras) {
+        if (e.code === 'Escape' || e.code === 'KeyE') {
+          e.preventDefault();
+          handleToggleSecurityCameras();
+          return;
+        }
+        if (e.code === 'ArrowLeft' || e.code === 'KeyA') {
+          e.preventDefault();
+          handleSelectCameraFeed((activeCameraIndex - 1 + 4) % 4);
+          return;
+        }
+        if (e.code === 'ArrowRight' || e.code === 'KeyD') {
+          e.preventDefault();
+          handleSelectCameraFeed((activeCameraIndex + 1) % 4);
+          return;
+        }
+        if (e.code === 'Digit1') { e.preventDefault(); handleSelectCameraFeed(0); return; }
+        if (e.code === 'Digit2') { e.preventDefault(); handleSelectCameraFeed(1); return; }
+        if (e.code === 'Digit3') { e.preventDefault(); handleSelectCameraFeed(2); return; }
+        if (e.code === 'Digit4') { e.preventDefault(); handleSelectCameraFeed(3); return; }
+      }
+
+      // In-vent fast traversal shortcuts
 
       // In-vent fast traversal shortcuts
       if (you?.ventId && you.ventLinks && you.ventLinks.length > 0) {
@@ -220,19 +292,29 @@ export const GameView: React.FC<GameViewProps> = ({ settings, onLeave }) => {
 
       if (e.code === 'KeyE' || e.code === 'Space') {
         if (e.code === 'Space') e.preventDefault();
-        doUse();
-      } else if (e.code === 'KeyR') doReport();
-      else if (e.code === 'KeyQ') doKill();
-      else if (e.code === 'KeyF') doVent();
+        if (ctx.sabotagePartId && ctx.sabotageType) {
+          handleRepairSabotage();
+        } else {
+          doUse();
+        }
+      } else if (e.code === 'KeyR') {
+        e.preventDefault();
+        doReport();
+      } else if (e.code === 'KeyQ') {
+        e.preventDefault();
+        doKill();
+      } else if (e.code === 'KeyF') {
+        e.preventDefault();
+        doVent();
+      } else if (e.code === 'KeyH') {
+        e.preventDefault();
+        handleToggleHitboxes();
+      }
       // Escape is handled by the open task window itself
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [doUse, doReport, doKill, doVent, handleVentMove, stopWork, you]);
-
-  const handleToggleCamera = () => {
-    if (sceneRef.current) setCameraMode(sceneRef.current.cameraController.toggleViewMode());
-  };
+  }, [doUse, doReport, doKill, doVent, handleRepairSabotage, handleToggleHitboxes, handleVentMove, stopWork, you, ctx.sabotagePartId, ctx.sabotageType]);
 
   const handleLeaveMatch = () => {
     net.leaveLobby();
@@ -257,6 +339,12 @@ export const GameView: React.FC<GameViewProps> = ({ settings, onLeave }) => {
         currentRoom={currentRoom}
         cameraMode={cameraMode}
         onToggleCamera={handleToggleCamera}
+        showHitboxes={showHitboxes}
+        onToggleHitboxes={handleToggleHitboxes}
+        isViewingCameras={isViewingCameras}
+        activeCameraIndex={activeCameraIndex}
+        onToggleSecurityCameras={handleToggleSecurityCameras}
+        onSelectCameraFeed={handleSelectCameraFeed}
         onLeave={handleLeaveMatch}
         playerPos={playerPos}
         snapshot={snapshot}
@@ -267,13 +355,58 @@ export const GameView: React.FC<GameViewProps> = ({ settings, onLeave }) => {
         onKill={doKill}
         onVent={doVent}
         onVentMove={handleVentMove}
-        onSabotage={doSabotage}
-        onFixSabotage={(type) => net.fixSabotage(type)}
         onSetWaypoint={(x, z) => sceneRef.current?.setWaypoint(x, z)}
         onCancelWork={() => stopWork(true)}
+        onRepairSabotage={handleRepairSabotage}
         onJoystick={handleJoystick}
         onCameraSettings={handleCameraSettings}
       />
+
+      {/* Interactive Sabotage Repair Minigame Modal */}
+      {activeSabotageGame && playing && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 pointer-events-auto">
+          {activeSabotageGame.type === 'lights' && (
+            <LightsFixGame
+              partId={activeSabotageGame.partId}
+              onResolve={() => {
+                net.fixSabotage(activeSabotageGame.partId);
+                setActiveSabotageGame(null);
+              }}
+              onClose={() => setActiveSabotageGame(null)}
+            />
+          )}
+          {activeSabotageGame.type === 'reactor' && (
+            <ReactorFixGame
+              partId={activeSabotageGame.partId}
+              onResolve={() => {
+                net.fixSabotage(activeSabotageGame.partId);
+                setActiveSabotageGame(null);
+              }}
+              onClose={() => setActiveSabotageGame(null)}
+            />
+          )}
+          {activeSabotageGame.type === 'o2' && (
+            <O2FixGame
+              partId={activeSabotageGame.partId}
+              onResolve={() => {
+                net.fixSabotage(activeSabotageGame.partId);
+                setActiveSabotageGame(null);
+              }}
+              onClose={() => setActiveSabotageGame(null)}
+            />
+          )}
+          {activeSabotageGame.type === 'comms' && (
+            <CommsFixGame
+              partId={activeSabotageGame.partId}
+              onResolve={() => {
+                net.fixSabotage(activeSabotageGame.partId);
+                setActiveSabotageGame(null);
+              }}
+              onClose={() => setActiveSabotageGame(null)}
+            />
+          )}
+        </div>
+      )}
 
       {work && playing && (
         <TaskGame

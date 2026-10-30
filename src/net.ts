@@ -13,6 +13,7 @@ type StartingListener = (countdown: number) => void;
 type MovementListener = (players: Record<string, { x: number; z: number; rotation: number; isMoving: boolean }>) => void;
 type GameStartedListener = (data: { map: string; settings: GameSettings }) => void;
 type StateSnapshotListener = (snapshot: GameStateSnapshot) => void;
+export type PlayerKilledListener = (data: { victimId: string; killerId?: string; x?: number; z?: number }) => void;
 
 class NetworkManager {
   private socket: Socket | null = null;
@@ -22,6 +23,7 @@ class NetworkManager {
   private movementListeners: Set<MovementListener> = new Set();
   private gameStartedListeners: Set<GameStartedListener> = new Set();
   private snapshotListeners: Set<StateSnapshotListener> = new Set();
+  private playerKilledListeners: Set<PlayerKilledListener> = new Set();
   private chatListeners: Set<(m: ChatMessage) => void> = new Set();
   private gameOverListeners: Set<(g: GameOverInfo) => void> = new Set();
   private currentLobby: LobbyData | null = null;
@@ -70,6 +72,9 @@ class NetworkManager {
 
     this.socket.on(EVENTS.CHAT_BROADCAST, (m: ChatMessage) => this.chatListeners.forEach((cb) => cb(m)));
     this.socket.on(EVENTS.GAME_OVER, (g: GameOverInfo) => this.gameOverListeners.forEach((cb) => cb(g)));
+    this.socket.on(EVENTS.PLAYER_KILLED, (data: { victimId: string; killerId?: string; x?: number; z?: number }) => {
+      this.playerKilledListeners.forEach((cb) => cb(data));
+    });
 
     this.socket.on('disconnect', () => {
       console.log('[Net] Disconnected from server');
@@ -158,17 +163,17 @@ class NetworkManager {
   public ventExit(): void {
     this.socket?.emit(EVENTS.VENT_EXIT);
   }
-  public startSabotage(type: SabotageType): void {
-    this.socket?.emit(EVENTS.SABOTAGE, { type });
-  }
-  public fixSabotage(type: SabotageType): void {
-    this.socket?.emit(EVENTS.FIX_SABOTAGE, { type });
-  }
   public castVote(targetId: string): void {
     this.socket?.emit(EVENTS.CAST_VOTE, { targetId });
   }
   public sendChat(text: string): void {
     this.socket?.emit(EVENTS.CHAT_MESSAGE, { text });
+  }
+  public sabotage(type: SabotageType, room?: string): void {
+    this.socket?.emit(EVENTS.SABOTAGE, { type, room });
+  }
+  public fixSabotage(partId?: number): void {
+    this.socket?.emit(EVENTS.FIX_SABOTAGE, { partId });
   }
   public onChat(cb: (m: ChatMessage) => void): () => void {
     this.chatListeners.add(cb);
@@ -208,6 +213,11 @@ class NetworkManager {
   public onMovement(cb: MovementListener): () => void {
     this.movementListeners.add(cb);
     return () => this.movementListeners.delete(cb);
+  }
+
+  public onPlayerKilled(cb: PlayerKilledListener): () => void {
+    this.playerKilledListeners.add(cb);
+    return () => this.playerKilledListeners.delete(cb);
   }
 }
 

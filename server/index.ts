@@ -83,10 +83,10 @@ export function createGameServer() {
     socket.on(EVENTS.VENT_ENTER, (d: { ventId: string }) => room()?.ventEnter(socket.id, String(d?.ventId)));
     socket.on(EVENTS.VENT_MOVE, (d: { ventId: string }) => room()?.ventMove(socket.id, String(d?.ventId)));
     socket.on(EVENTS.VENT_EXIT, () => room()?.ventExit(socket.id));
-    socket.on(EVENTS.SABOTAGE, (d: { type: import('../shared/events').SabotageType }) => room()?.startSabotage(socket.id, d?.type));
-    socket.on(EVENTS.FIX_SABOTAGE, (d: { type: import('../shared/events').SabotageType }) => room()?.fixSabotage(socket.id, d?.type));
     socket.on(EVENTS.CAST_VOTE, (d: { targetId: string }) => room()?.castVote(socket.id, String(d?.targetId)));
     socket.on(EVENTS.CHAT_MESSAGE, (d: { text: string }) => room()?.chat(socket.id, String(d?.text ?? '')));
+    socket.on(EVENTS.SABOTAGE, (d: { type: import('../shared/events').SabotageType; room?: string }) => room()?.triggerSabotage(socket.id, d?.type, d?.room));
+    socket.on(EVENTS.FIX_SABOTAGE, (d: { partId?: number }) => room()?.fixSabotage(socket.id, d?.partId));
 
     socket.on('disconnect', () => {
       lobbyManager.leaveLobby(socket);

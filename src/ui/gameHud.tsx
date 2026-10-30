@@ -18,20 +18,29 @@ import {
   AlertTriangle,
   ChevronDown,
   ChevronUp,
+  Boxes,
+  Wrench,
 } from 'lucide-react';
 import { GAME_STATES } from '../../shared/constants';
-import { GameStateSnapshot, SabotageType } from '../../shared/events';
-import { MAP_BOUNDS, MAP_CORRIDORS, MAP_ROOMS_DETAIL, MAP_VENTS, SABOTAGE_REPAIR_POINTS } from '../../shared/mapData';
+import { GameStateSnapshot } from '../../shared/events';
+import { MAP_BOUNDS, MAP_CORRIDORS, MAP_ROOMS_DETAIL, MAP_VENTS, SABOTAGE_REPAIR_POINTS, SECURITY_CAMERAS } from '../../shared/mapData';
 import { soundEngine } from '../audio';
 import { net } from '../net';
 import { CameraViewMode } from '../render/cameraController';
 import { InteractionContext } from '../render/gameScene';
+import { SabotageModal } from './sabotageModal';
 import type { WorkState } from './gameView';
 
 interface GameHudProps {
   currentRoom: string;
   cameraMode: CameraViewMode;
   onToggleCamera: () => void;
+  showHitboxes?: boolean;
+  onToggleHitboxes?: () => void;
+  isViewingCameras?: boolean;
+  activeCameraIndex?: number;
+  onToggleSecurityCameras?: () => void;
+  onSelectCameraFeed?: (index: number) => void;
   onLeave: () => void;
   playerPos: { x: number; z: number };
   snapshot: GameStateSnapshot | null;
@@ -42,10 +51,9 @@ interface GameHudProps {
   onKill: () => void;
   onVent: () => void;
   onVentMove: (ventId: string) => void;
-  onSabotage: (type: SabotageType) => void;
-  onFixSabotage: (type: SabotageType) => void;
   onSetWaypoint: (x: number, z: number) => void;
   onCancelWork: () => void;
+  onRepairSabotage?: () => void;
   onJoystick: (x: number, y: number) => void;
   onCameraSettings?: (sensitivityPct: number, headBob: boolean) => void;
 }
@@ -152,12 +160,188 @@ const Joystick: React.FC<{ onChange: (x: number, y: number) => void }> = ({ onCh
   );
 };
 
+const SecurityCCTVOverlay: React.FC<{
+  activeCameraIndex: number;
+  onSelectFeed: (idx: number) => void;
+  onClose: () => void;
+  snapshot: GameStateSnapshot | null;
+}> = ({ activeCameraIndex, onSelectFeed, onClose, snapshot }) => {
+  const [recTimer, setRecTimer] = useState(0);
+  const currentCam = SECURITY_CAMERAS[activeCameraIndex] || SECURITY_CAMERAS[0];
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setRecTimer((t) => t + 0.1);
+    }, 100);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Find living crewmates and corpses currently in this camera's coverage sector
+  const detectedActors: Array<{ name: string; isAlive: boolean }> = [];
+  if (snapshot?.players) {
+    for (const p of Object.values(snapshot.players)) {
+      if (!p.inVent && p.x >= currentCam.zone.minX && p.x <= currentCam.zone.maxX &&
+          p.z >= currentCam.zone.minZ && p.z <= currentCam.zone.maxZ) {
+        detectedActors.push({ name: p.name, isAlive: p.isAlive });
+      }
+    }
+  }
+
+  const mins = Math.floor(recTimer / 60).toString().padStart(2, '0');
+  const secs = Math.floor(recTimer % 60).toString().padStart(2, '0');
+  const tenths = Math.floor((recTimer * 10) % 10);
+
+  return (
+    <div className="fixed inset-0 z-50 pointer-events-auto flex flex-col justify-between p-3 sm:p-6 bg-transparent select-none">
+      {/* CRT Scanline & Phosphor Vignette Filter */}
+      <div
+        className="absolute inset-0 pointer-events-none z-10 opacity-35"
+        style={{
+          background: 'linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.45) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.04), rgba(0, 255, 0, 0.01), rgba(0, 0, 255, 0.04))',
+          backgroundSize: '100% 4px, 6px 100%',
+        }}
+      />
+      <div className="absolute inset-0 pointer-events-none z-10 shadow-[inset_0_0_120px_rgba(0,0,0,0.85)] border-4 border-slate-900/90 rounded-2xl" />
+
+      {/* TOP CCTV BAR */}
+      <div className="relative z-20 flex items-center justify-between bg-slate-950/85 backdrop-blur-md border border-slate-800 rounded-2xl px-4 py-3 shadow-2xl">
+        <div className="flex items-center space-x-3">
+          <div className="flex items-center space-x-2 bg-red-950/80 border border-red-700/60 px-3 py-1 rounded-full">
+            <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse" />
+            <span className="text-xs font-mono font-bold text-red-300">REC [{mins}:{secs}.{tenths}]</span>
+          </div>
+          <div className="hidden sm:flex items-center space-x-2 text-slate-400 font-mono text-xs">
+            <span className="text-emerald-400 font-bold">● LIVE FEED</span>
+            <span>// THE SKELD CCTV SURVEILLANCE</span>
+          </div>
+        </div>
+
+        {/* Camera Switcher Tabs */}
+        <div className="flex items-center space-x-1.5 overflow-x-auto max-w-[55vw] py-1">
+          {SECURITY_CAMERAS.map((cam, idx) => (
+            <button
+              key={cam.id}
+              onClick={() => onSelectFeed(idx)}
+              className={`px-3 py-1.5 rounded-xl font-mono text-xs font-bold transition-all cursor-pointer whitespace-nowrap flex items-center space-x-1.5 ${
+                activeCameraIndex === idx
+                  ? 'bg-emerald-500 text-slate-950 shadow-[0_0_15px_rgba(16,185,129,0.5)] scale-105'
+                  : 'bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800'
+              }`}
+            >
+              <Video className="w-3.5 h-3.5" />
+              <span>{cam.name}</span>
+            </button>
+          ))}
+        </div>
+
+        {/* Exit Button */}
+        <button
+          onClick={onClose}
+          className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-red-600/90 hover:bg-red-500 text-white font-black text-xs transition-all cursor-pointer shadow-lg active:scale-95"
+        >
+          <X className="w-4 h-4" />
+          <span className="hidden sm:inline">EXIT [ESC]</span>
+        </button>
+      </div>
+
+      {/* Comms Sabotage Static Signal Loss Overlay */}
+      {snapshot?.sabotage?.commsDisabled && (
+        <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-black/90 backdrop-blur-md text-center p-6 select-none pointer-events-none">
+          <AlertTriangle className="w-16 h-16 text-red-500 animate-pulse mb-3" />
+          <h2 className="text-2xl sm:text-3xl font-mono font-black text-red-400 tracking-widest uppercase">
+            COMMUNICATIONS OFFLINE
+          </h2>
+          <p className="text-xs sm:text-sm font-mono text-slate-300 mt-2 max-w-md">
+            SURVEILLANCE SATELLITE DOWNLINK JAMMED. REPAIR COMMUNICATIONS RELAY TO RESTORE VIDEO FEEDS.
+          </p>
+        </div>
+      )}
+
+      {/* CENTER HUD RETICLE & CAMERA WATERMARK */}
+      <div className="relative z-20 flex-1 flex flex-col justify-between py-6 pointer-events-none">
+        <div className="flex items-center justify-between px-4">
+          <div className="bg-slate-950/75 border border-emerald-500/40 px-3 py-1.5 rounded-xl text-emerald-400 font-mono text-xs space-y-0.5">
+            <div className="font-bold tracking-wider">{currentCam.name} // {currentCam.sector.toUpperCase()}</div>
+            <div className="text-[10px] text-slate-400">FPS: 30.0 • OPTICAL ZOOM: 1.0X • NIGHTVISION ACTIVE</div>
+          </div>
+          <div className="text-right text-[11px] font-mono text-slate-400 bg-slate-950/75 border border-slate-800 px-3 py-1 rounded-xl">
+            CORRIDOR SECURITY FEED
+          </div>
+        </div>
+
+        {/* Crosshair / Viewfinder Corner Brackets */}
+        <div className="relative w-48 h-48 sm:w-64 sm:h-64 mx-auto border-2 border-emerald-500/20 rounded-3xl flex items-center justify-center">
+          <div className="w-6 h-6 border-t-2 border-l-2 border-emerald-400 absolute -top-1 -left-1" />
+          <div className="w-6 h-6 border-t-2 border-r-2 border-emerald-400 absolute -top-1 -right-1" />
+          <div className="w-6 h-6 border-b-2 border-l-2 border-emerald-400 absolute -bottom-1 -left-1" />
+          <div className="w-6 h-6 border-b-2 border-r-2 border-emerald-400 absolute -bottom-1 -right-1" />
+          <span className="text-[10px] font-mono text-emerald-500/60 uppercase tracking-widest">+ MONITORING +</span>
+        </div>
+
+        {/* Sector Detection Readout */}
+        <div className="px-4">
+          <div className="inline-flex flex-col bg-slate-950/80 border border-slate-800 rounded-2xl p-3 min-w-[240px] pointer-events-auto">
+            <div className="flex items-center space-x-2 text-xs font-mono font-bold text-slate-300 pb-1.5 border-b border-slate-800">
+              <span className={`w-2 h-2 rounded-full ${detectedActors.length > 0 ? 'bg-amber-400 animate-ping' : 'bg-emerald-400'}`} />
+              <span>SECTOR RADAR DETECTION</span>
+            </div>
+            {detectedActors.length === 0 ? (
+              <div className="text-[11px] font-mono text-slate-500 pt-2 flex items-center space-x-1.5">
+                <span>SECTOR SECURE • NO CREWMATE MOVEMENT</span>
+              </div>
+            ) : (
+              <div className="space-y-1.5 pt-2">
+                {detectedActors.map((p, idx) => (
+                  <div key={idx} className="flex items-center justify-between text-xs font-mono">
+                    <span className="text-white font-bold">{p.name}</span>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-950 border border-emerald-700/60 text-emerald-300 font-bold">
+                      {p.isAlive ? 'IN SECTOR' : 'CORPSE DETECTED'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* BOTTOM CCTV CONTROLS BAR */}
+      <div className="relative z-20 flex items-center justify-between bg-slate-950/85 backdrop-blur-md border border-slate-800 rounded-2xl px-4 py-2.5 shadow-2xl">
+        <div className="text-xs font-mono text-slate-400">
+          SHORTCUTS: <span className="text-cyan-300 font-bold">[1-4]</span> SELECT CAM • <span className="text-cyan-300 font-bold">[A / D]</span> CYCLE • <span className="text-cyan-300 font-bold">[ESC]</span> EXIT
+        </div>
+
+        <div className="flex items-center space-x-2">
+          <button
+            onClick={() => onSelectFeed((activeCameraIndex - 1 + SECURITY_CAMERAS.length) % SECURITY_CAMERAS.length)}
+            className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs cursor-pointer"
+          >
+            ◀ PREV CAM
+          </button>
+          <button
+            onClick={() => onSelectFeed((activeCameraIndex + 1) % SECURITY_CAMERAS.length)}
+            className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs cursor-pointer"
+          >
+            NEXT CAM ▶
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const ventLabel = (id: string): string => MAP_VENTS.find((v) => v.id === id)?.room || id;
 
 export const GameHud: React.FC<GameHudProps> = ({
   currentRoom,
   cameraMode,
   onToggleCamera,
+  showHitboxes = false,
+  onToggleHitboxes,
+  isViewingCameras = false,
+  activeCameraIndex = 0,
+  onToggleSecurityCameras,
+  onSelectCameraFeed,
   onLeave,
   playerPos,
   snapshot,
@@ -168,14 +352,14 @@ export const GameHud: React.FC<GameHudProps> = ({
   onKill,
   onVent,
   onVentMove,
-  onSabotage,
-  onFixSabotage,
   onSetWaypoint,
   onCancelWork,
+  onRepairSabotage,
   onJoystick,
   onCameraSettings,
 }) => {
   const [showMap, setShowMap] = useState(false);
+  const [showSabotageModal, setShowSabotageModal] = useState(false);
   const [showTasks, setShowTasks] = useState(true);
   const [now, setNow] = useState(performance.now());
   useEffect(() => {
@@ -195,7 +379,6 @@ export const GameHud: React.FC<GameHudProps> = ({
   const progress = Math.round((snapshot?.taskProgress || 0) * 100);
   const coarse = typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches;
   const [showSettings, setShowSettings] = useState(false);
-  const [showSabotage, setShowSabotage] = useState(false);
 
   // Settings
   const [sensitivity, setSensitivity] = useState(50);
@@ -204,7 +387,7 @@ export const GameHud: React.FC<GameHudProps> = ({
     onCameraSettings?.(sensitivity, headBob);
   }, [sensitivity, headBob, onCameraSettings]);
 
-  // Key listeners for M/Tab (Map)
+  // Key listeners for Map (M/Tab), Sabotage (C), Camera Toggle (V), and Escape
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement | null;
@@ -213,17 +396,26 @@ export const GameHud: React.FC<GameHudProps> = ({
         e.preventDefault();
         soundEngine.playClick();
         setShowMap((prev) => !prev);
-      }
-      if (e.code === 'Escape') {
+      } else if (e.code === 'KeyC') {
+        if (isImpostor && playing && alive && !inVent) {
+          e.preventDefault();
+          soundEngine.playClick();
+          setShowSabotageModal((prev) => !prev);
+        }
+      } else if (e.code === 'KeyV') {
+        e.preventDefault();
+        soundEngine.playClick();
+        onToggleCamera();
+      } else if (e.code === 'Escape') {
         setShowMap(false);
         setShowSettings(false);
-        setShowSabotage(false);
+        setShowSabotageModal(false);
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [isImpostor, playing, alive, inVent, onToggleCamera]);
 
   const workPct = work ? Math.min(100, ((now - work.startedAt) / (work.hold * 1000)) * 100) : 0;
   const commsJammed = snapshot?.sabotage?.type === 'comms';
@@ -255,17 +447,25 @@ export const GameHud: React.FC<GameHudProps> = ({
             </button>
             {showTasks && (
               <div className="px-3 pb-2 space-y-0.5 text-[12px] font-bold">
-                {commsJammed && <div className="text-amber-200">Signal lost · task data unavailable</div>}
-                {!commsJammed && myTasks.length === 0 && <div className="text-slate-500">No tasks</div>}
-                {myTasks.map((t) => (
-                  <div
-                    key={t.taskId}
-                    className={t.done ? 'text-green-400 line-through' : t.step > 0 ? 'text-yellow-300' : 'text-white'}
-                  >
-                    {t.room}: {t.name}
-                    {t.totalSteps > 1 ? ` (${Math.min(t.step, t.totalSteps)}/${t.totalSteps})` : ''}
+                {snapshot?.sabotage?.commsDisabled && !isImpostor ? (
+                  <div className="text-red-400 font-mono text-xs py-1.5 flex items-center space-x-1.5 animate-pulse">
+                    <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+                    <span>COMMS OFFLINE: SENSORS BLIND</span>
                   </div>
-                ))}
+                ) : (
+                  <>
+                    {myTasks.length === 0 && <div className="text-slate-500">No tasks</div>}
+                    {myTasks.map((t) => (
+                      <div
+                        key={t.taskId}
+                        className={t.done ? 'text-green-400 line-through' : t.step > 0 ? 'text-yellow-300' : 'text-white'}
+                      >
+                        {t.room}: {t.name}
+                        {t.totalSteps > 1 ? ` (${Math.min(t.step, t.totalSteps)}/${t.totalSteps})` : ''}
+                      </div>
+                    ))}
+                  </>
+                )}
               </div>
             )}
           </div>
@@ -281,24 +481,6 @@ export const GameHud: React.FC<GameHudProps> = ({
           )}
         </div>
 
-        {snapshot?.sabotage && (
-          <div className={`absolute top-20 left-1/2 -translate-x-1/2 px-5 py-2 rounded-xl border-2 font-black tracking-widest shadow-xl animate-pulse ${
-            snapshot.sabotage.type === 'reactor' || snapshot.sabotage.type === 'o2'
-              ? 'bg-red-950/95 border-red-500 text-red-200'
-              : 'bg-amber-950/95 border-amber-500 text-amber-100'
-          }`}>
-            {snapshot.sabotage.type.toUpperCase()} SABOTAGE · {snapshot.sabotage.countdown}s
-            {ctx.fixSabotageType && (
-              <button
-                onClick={() => onFixSabotage(ctx.fixSabotageType!)}
-                className="ml-3 px-3 py-1 rounded-lg bg-emerald-500 text-slate-950 text-xs font-black hover:bg-emerald-400"
-              >
-                REPAIR [E]
-              </button>
-            )}
-          </div>
-        )}
-
         {/* Center: room banner */}
         <div className="flex flex-col items-center">
           <div className="bg-slate-900/90 backdrop-blur-md px-6 py-2 rounded-2xl border-2 border-slate-700/90 shadow-2xl flex items-center space-x-2.5">
@@ -309,35 +491,53 @@ export const GameHud: React.FC<GameHudProps> = ({
           </div>
         </div>
 
-        {showSabotage && isImpostor && (
-          <div className="absolute right-4 bottom-36 z-40 w-56 p-3 space-y-2 rounded-2xl border-2 border-rose-500 bg-slate-950/95 shadow-2xl pointer-events-auto">
-            <div className="flex items-center justify-between text-xs font-black tracking-widest text-rose-300">
-              SELECT SYSTEM
-              <button onClick={() => setShowSabotage(false)} aria-label="Close sabotage menu"><X className="w-4 h-4" /></button>
+        {/* ACTIVE SABOTAGE TOP ALERT BANNER */}
+        {snapshot?.sabotage && (
+          <div className="absolute top-16 left-1/2 -translate-x-1/2 z-40 w-[92vw] max-w-xl bg-red-950/95 border-2 border-red-500 px-4 py-2 rounded-2xl shadow-[0_0_35px_rgba(239,68,68,0.6)] flex items-center justify-between text-white pointer-events-auto">
+            <div className="flex items-center space-x-2.5">
+              <AlertTriangle className="w-6 h-6 text-red-400 shrink-0 animate-pulse" />
+              <div className="text-left">
+                <div className="text-xs sm:text-sm font-black tracking-wider uppercase text-red-200">
+                  {snapshot.sabotage.type === 'reactor' && 'CRITICAL: REACTOR MELTDOWN!'}
+                  {snapshot.sabotage.type === 'o2' && 'CRITICAL: O2 DEPLETION!'}
+                  {snapshot.sabotage.type === 'lights' && 'POWER FAILURE: SHIP LIGHTS OFFLINE!'}
+                  {snapshot.sabotage.type === 'comms' && 'COMMUNICATIONS JAMMED!'}
+                </div>
+                <div className="text-[10px] text-red-300/80 font-bold">
+                  {snapshot.sabotage.type === 'reactor' && 'Stabilize manifolds in Reactor room'}
+                  {snapshot.sabotage.type === 'o2' && 'Enter emergency PIN in O2 & Admin'}
+                  {snapshot.sabotage.type === 'lights' && 'Reset breaker switches in Electrical'}
+                  {snapshot.sabotage.type === 'comms' && 'Realign radio frequency in Comms'}
+                </div>
+              </div>
             </div>
-            {([
-              ['reactor', 'REACTOR MELTDOWN', 'Critical · 35s'],
-              ['o2', 'OXYGEN FAILURE', 'Critical · 35s'],
-              ['lights', 'LIGHTS OUT', 'Repair · 20s'],
-              ['comms', 'COMMS JAMMED', 'Repair · 20s'],
-            ] as [SabotageType, string, string][]).map(([type, label, detail]) => (
-              <button
-                key={type}
-                onClick={() => {
-                  onSabotage(type);
-                  setShowSabotage(false);
-                }}
-                className="w-full rounded-xl bg-slate-800 hover:bg-rose-900/80 px-3 py-2 text-left transition-colors"
-              >
-                <span className="block text-xs font-black text-white">{label}</span>
-                <span className="text-[10px] text-slate-200">{detail}</span>
-              </button>
-            ))}
+            {snapshot.sabotage.isCritical && (
+              <div className="text-xl sm:text-2xl font-mono font-black text-red-400 bg-red-900/80 border border-red-500 px-3 py-1 rounded-xl shrink-0">
+                {snapshot.sabotage.remainingSecs}s
+              </div>
+            )}
           </div>
         )}
 
-        {/* Right: Map, camera, settings, exit */}
+        {/* Right: Hitbox wireframe, Map, camera, settings, exit */}
         <div className="flex items-center space-x-2 pointer-events-auto">
+          <button
+            onClick={() => {
+              soundEngine.playClick();
+              onToggleHitboxes?.();
+            }}
+            className={`p-2.5 rounded-2xl backdrop-blur-md border-2 transition-all cursor-pointer shadow-xl flex items-center space-x-1.5 ${
+              showHitboxes
+                ? 'bg-emerald-500 border-emerald-300 text-slate-950 font-black shadow-[0_0_15px_rgba(52,211,153,0.5)]'
+                : 'bg-slate-900/85 hover:bg-slate-800 border-slate-700/80 text-emerald-400'
+            }`}
+            title="Toggle Visual Hitbox Wireframes (H key)"
+          >
+            <Boxes className="w-5 h-5" />
+            <span className="text-xs font-black tracking-wider hidden sm:inline">
+              {showHitboxes ? 'HITBOX: ON' : 'HITBOX'}
+            </span>
+          </button>
           <button
             onClick={() => {
               soundEngine.playClick();
@@ -381,6 +581,25 @@ export const GameHud: React.FC<GameHudProps> = ({
         </div>
       </div>
 
+      {/* Floating Hitbox Wireframe Debug Telemetry Bar */}
+      {showHitboxes && (
+        <div className="absolute top-16 left-1/2 -translate-x-1/2 z-40 bg-slate-900/95 border-2 border-emerald-500/80 px-4 py-1.5 rounded-full shadow-[0_4px_25px_rgba(16,185,129,0.35)] flex items-center space-x-3 text-xs font-black tracking-wider text-emerald-300 animate-fadeIn pointer-events-auto">
+          <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping shrink-0" />
+          <span className="shrink-0">WIREFRAME HITBOXES ACTIVE</span>
+          <span className="text-slate-500 font-bold">•</span>
+          <span className="text-white font-mono shrink-0">
+            [{playerPos.x.toFixed(1)}, {playerPos.z.toFixed(1)}]
+          </span>
+          <span className="text-slate-500 font-bold hidden md:inline">•</span>
+          <span className="text-emerald-400 font-bold hidden md:inline">WALLS</span>
+          <span className="text-yellow-400 font-bold hidden md:inline">MACHINERY</span>
+          <span className="text-cyan-400 font-bold hidden md:inline">PLAYER</span>
+          <span className="px-2 py-0.5 rounded-md bg-slate-800 text-[10px] text-slate-300 font-bold shrink-0">
+            [H] TOGGLE
+          </span>
+        </div>
+      )}
+
       {/* Vent navigation */}
       {inVent && you && (
         <div className="absolute left-1/2 -translate-x-1/2 bottom-32 pointer-events-auto">
@@ -411,7 +630,7 @@ export const GameHud: React.FC<GameHudProps> = ({
         <div className="flex flex-col items-start space-y-2">
           {coarse && <Joystick onChange={onJoystick} />}
           <div className="bg-slate-900/80 backdrop-blur-md p-3 rounded-2xl border border-slate-800 text-xs text-slate-400 font-medium hidden md:block">
-            <div><strong className="text-cyan-300">WASD / Arrows:</strong> Walk</div>
+            <div><strong className="text-cyan-300">WASD / Arrows:</strong> Walk • <strong className="text-yellow-300">Shift:</strong> Sprint</div>
             <div><strong className="text-cyan-300">Mouse Drag:</strong> Orbit Camera</div>
             <div><strong className="text-cyan-300">E / Space:</strong> Use • <strong className="text-cyan-300">R:</strong> Report</div>
             {isImpostor && <div><strong className="text-red-300">Q:</strong> Kill • <strong className="text-red-300">F:</strong> Vent</div>}
@@ -427,11 +646,10 @@ export const GameHud: React.FC<GameHudProps> = ({
               <ActionButton
                 tone="sabotage"
                 label="SABOTAGE"
-                enabled={!!playing && alive && !inVent && !snapshot?.sabotage && (you?.sabotageCooldownMs ?? 0) <= 0}
-                title={(you?.sabotageCooldownMs ?? 0) > 0
-                  ? `Sabotage recharging: ${Math.ceil((you?.sabotageCooldownMs ?? 0) / 1000)}s`
-                  : 'Choose a ship system to sabotage'}
-                onClick={() => setShowSabotage((value) => !value)}
+                hint="[C]"
+                enabled={!!playing && alive && !inVent && (snapshot?.you?.sabotageCooldownSecs ?? 0) <= 0 && !snapshot?.sabotage}
+                badge={(snapshot?.you?.sabotageCooldownSecs ?? 0) > 0 ? String(snapshot?.you?.sabotageCooldownSecs) : undefined}
+                onClick={() => setShowSabotageModal(true)}
                 icon={<AlertTriangle className="w-7 h-7 mb-0.5" />}
               />
             )}
@@ -471,17 +689,44 @@ export const GameHud: React.FC<GameHudProps> = ({
                 )}
               </>
             )}
-            <ActionButton
-              tone="use"
-              label={ctx.fixSabotageType ? 'REPAIR' : ctx.emergency ? 'EMERGENCY' : 'USE'}
-              hint="[E]"
-              enabled={!!playing && !inVent && !work && (ctx.fixSabotageType !== null || ctx.emergency || !!ctx.taskId)}
-              onClick={onUse}
-              icon={<Hand className="w-7 h-7 mb-0.5" />}
-            />
+            {ctx.sabotagePartId ? (
+              <ActionButton
+                tone="report"
+                label="REPAIR"
+                hint="[E]"
+                enabled={!!playing && alive && !inVent}
+                onClick={onRepairSabotage || onUse}
+                icon={<Wrench className="w-7 h-7 mb-0.5 text-yellow-300 animate-bounce" />}
+              />
+            ) : (
+              <ActionButton
+                tone="use"
+                label={ctx.emergency ? 'EMERGENCY' : (ctx.canUseCameras ? 'CAMERAS' : 'USE')}
+                hint="[E]"
+                enabled={!!playing && !inVent && !work && (ctx.emergency || !!ctx.taskId || !!ctx.canUseCameras)}
+                onClick={() => {
+                  if (ctx.canUseCameras) {
+                    onToggleSecurityCameras?.();
+                  } else {
+                    onUse();
+                  }
+                }}
+                icon={ctx.canUseCameras ? <Video className="w-7 h-7 mb-0.5 text-emerald-400" /> : <Hand className="w-7 h-7 mb-0.5" />}
+              />
+            )}
           </div>
         </div>
       </div>
+
+      {/* SECURITY CCTV SURVEILLANCE OVERLAY */}
+      {isViewingCameras && (
+        <SecurityCCTVOverlay
+          activeCameraIndex={activeCameraIndex}
+          onSelectFeed={onSelectCameraFeed || (() => {})}
+          onClose={onToggleSecurityCameras || (() => {})}
+          snapshot={snapshot}
+        />
+      )}
 
       {/* FULL SCHEMATIC MAP MODAL (Tab / M) */}
       {showMap && (
@@ -671,6 +916,16 @@ export const GameHud: React.FC<GameHudProps> = ({
             </button>
           </div>
         </div>
+      )}
+
+      {/* Impostor Sabotage Grid Modal */}
+      {showSabotageModal && (
+        <SabotageModal
+          cooldownSecs={snapshot?.you?.sabotageCooldownSecs ?? 0}
+          activeSabotageType={snapshot?.sabotage?.type}
+          lockedRooms={snapshot?.doorLocks}
+          onClose={() => setShowSabotageModal(false)}
+        />
       )}
     </div>
   );

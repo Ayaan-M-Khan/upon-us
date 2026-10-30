@@ -4,8 +4,10 @@
  */
 
 import React, { useEffect, useRef, useState } from 'react';
+import { AlertTriangle, MapPin, Megaphone, Skull } from 'lucide-react';
 import { PLAYER_COLORS } from '../../shared/constants';
 import { ChatMessage, GameOverInfo, GameStateSnapshot } from '../../shared/events';
+import { soundEngine } from '../audio';
 import { net } from '../net';
 
 export const colorHex = (id: string): string => PLAYER_COLORS.find((c) => c.id === id)?.hex || '#94a3b8';
@@ -18,6 +20,23 @@ export const Bean: React.FC<{ colorId: string; size?: number; dead?: boolean }> 
     <path d="M10 14c0-7 5-11 11-11s11 4 11 11v22H24v-6h-4v6H10z" fill={colorHex(colorId)} />
     <rect x="18" y="10" width="14" height="9" rx="4.5" fill="#bfe9ff" stroke="#1e3a5f" strokeWidth="1.2" />
     <rect x="21" y="11.5" width="7" height="2.5" rx="1.2" fill="#fff" opacity="0.8" />
+  </svg>
+);
+
+/** Severed crewmate body with bone and meat cross-section used for casualty reports. */
+export const SlicedDeadBodyBean: React.FC<{ colorId: string; size?: number }> = ({ colorId, size = 64 }) => (
+  <svg width={size} height={size * 1.1} viewBox="0 0 48 52" className="drop-shadow-[0_8px_16px_rgba(0,0,0,0.6)]">
+    <ellipse cx="24" cy="46" rx="22" ry="5.5" fill="#7f1d1d" opacity="0.85" />
+    <ellipse cx="22" cy="45" rx="16" ry="3.5" fill="#991b1b" />
+    <rect x="7" y="32" width="9" height="13" rx="4" fill={colorShadow(colorId)} />
+    <rect x="24" y="32" width="9" height="13" rx="4" fill={colorHex(colorId)} />
+    <path d="M7 28 C7 28, 7 36, 14 36 L26 36 C33 36, 33 28, 33 28 Z" fill={colorHex(colorId)} />
+    <rect x="1" y="27" width="8" height="13" rx="3.5" fill={colorShadow(colorId)} />
+    <ellipse cx="20" cy="27" rx="13" ry="4" fill="#991b1b" stroke="#7f1d1d" strokeWidth="1" />
+    <ellipse cx="20" cy="27" rx="9" ry="2.5" fill="#dc2626" opacity="0.6" />
+    <rect x="18" y="11" width="4.5" height="16" rx="2" fill="#f8fafc" stroke="#cbd5e1" strokeWidth="0.8" />
+    <circle cx="17.5" cy="10" r="3.2" fill="#ffffff" stroke="#cbd5e1" strokeWidth="0.8" />
+    <circle cx="22.5" cy="10" r="3.2" fill="#ffffff" stroke="#cbd5e1" strokeWidth="0.8" />
   </svg>
 );
 
@@ -83,6 +102,7 @@ export const MeetingOverlay: React.FC<{ snapshot: GameStateSnapshot }> = ({ snap
       meetingKey.current = key + Date.now();
       setChat([]);
       setSelected(null);
+      soundEngine.playReportSiren();
     }
   }, [meeting, key]);
 
@@ -94,17 +114,102 @@ export const MeetingOverlay: React.FC<{ snapshot: GameStateSnapshot }> = ({ snap
   const secs = Math.ceil(meeting.remainingMs / 1000);
 
   if (meeting.phase === 'INTRO') {
+    const isBody = meeting.reason === 'body';
     return (
-      <div className="fixed inset-0 z-40 flex flex-col items-center justify-center bg-red-950/95 pointer-events-auto">
-        <div className="text-5xl sm:text-6xl font-black text-red-400 tracking-widest animate-pulse">
-          {meeting.reason === 'body' ? 'DEAD BODY REPORTED' : 'EMERGENCY MEETING'}
-        </div>
-        <div className="mt-3 text-slate-200 font-bold">Called by {meeting.callerName}</div>
-        {meeting.reason === 'body' && meeting.bodyColorId && (
-          <div className="mt-6">
-            <Bean colorId={meeting.bodyColorId} size={72} dead />
+      <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/95 overflow-hidden select-none pointer-events-auto">
+        {/* Dynamic rotating alarm rays background */}
+        <div
+          className={`absolute inset-0 opacity-25 animate-spin ${
+            isBody
+              ? 'bg-[conic-gradient(from_0deg,#ef4444,transparent_40deg,#dc2626_80deg,transparent_120deg,#b91c1c_180deg,transparent_220deg,#ef4444_270deg,transparent_310deg,#dc2626_360deg)]'
+              : 'bg-[conic-gradient(from_0deg,#eab308,transparent_40deg,#f59e0b_80deg,transparent_120deg,#d97706_180deg,transparent_220deg,#eab308_270deg,transparent_310deg,#f59e0b_360deg)]'
+          }`}
+          style={{ animationDuration: '8s' }}
+        />
+        <div className="absolute inset-0 bg-radial from-transparent via-black/60 to-black/95" />
+
+        {/* Hazard stripes at top and bottom */}
+        <div className="absolute top-0 left-0 right-0 h-4 bg-[repeating-linear-gradient(45deg,#000,#000_15px,#ef4444_15px,#ef4444_30px)] shadow-lg" />
+        <div className="absolute bottom-0 left-0 right-0 h-4 bg-[repeating-linear-gradient(45deg,#000,#000_15px,#ef4444_15px,#ef4444_30px)] shadow-lg" />
+
+        <div className="relative z-10 flex flex-col items-center max-w-4xl px-4 text-center">
+          {/* Flashing Icon Badge */}
+          <div className="relative mb-3 flex items-center justify-center">
+            <div className={`absolute w-28 h-28 rounded-full animate-ping opacity-35 ${isBody ? 'bg-red-600' : 'bg-amber-500'}`} />
+            <div
+              className={`relative p-5 rounded-full border-4 shadow-2xl flex items-center justify-center ${
+                isBody
+                  ? 'bg-red-950/90 border-red-500 shadow-[0_0_50px_rgba(239,68,68,0.7)] text-red-400'
+                  : 'bg-amber-950/90 border-amber-500 shadow-[0_0_50px_rgba(245,158,11,0.7)] text-amber-400'
+              }`}
+            >
+              {isBody ? <Megaphone className="w-14 h-14 animate-bounce" /> : <AlertTriangle className="w-14 h-14 animate-pulse" />}
+            </div>
           </div>
-        )}
+
+          {/* Title Banner */}
+          <h1
+            className={`text-4xl sm:text-6xl md:text-7xl font-black tracking-widest uppercase mb-2 ${
+              isBody
+                ? 'text-transparent bg-clip-text bg-gradient-to-b from-red-200 via-red-500 to-red-700 drop-shadow-[0_0_35px_rgba(239,68,68,0.9)]'
+                : 'text-transparent bg-clip-text bg-gradient-to-b from-amber-100 via-amber-400 to-amber-600 drop-shadow-[0_0_35px_rgba(245,158,11,0.9)]'
+            }`}
+          >
+            {isBody ? 'DEAD BODY REPORTED!' : 'EMERGENCY MEETING!'}
+          </h1>
+
+          {/* Cards Display Grid */}
+          <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4 w-full max-w-2xl">
+            {/* Reporter card */}
+            <div className="flex flex-col items-center bg-slate-900/90 border-2 border-slate-700/80 rounded-3xl p-4 shadow-xl">
+              <span className="text-[11px] font-black tracking-widest uppercase text-slate-400 mb-2 flex items-center space-x-1">
+                <Megaphone className="w-3.5 h-3.5 text-cyan-400 mr-1" />
+                REPORTED BY
+              </span>
+              <Bean colorId={meeting.callerColorId || 'red'} size={64} />
+              <div className="mt-2 text-xl font-black text-white">{meeting.callerName}</div>
+              <span className="text-xs font-bold text-cyan-300 bg-cyan-950/80 border border-cyan-700/50 px-2.5 py-0.5 rounded-full mt-1">
+                CALLER
+              </span>
+            </div>
+
+            {/* Target card */}
+            {isBody ? (
+              <div className="flex flex-col items-center bg-red-950/60 border-2 border-red-700/80 rounded-3xl p-4 shadow-xl">
+                <span className="text-[11px] font-black tracking-widest uppercase text-red-300 mb-2 flex items-center space-x-1">
+                  <Skull className="w-3.5 h-3.5 text-red-400 mr-1" />
+                  CASUALTY FOUND
+                </span>
+                <SlicedDeadBodyBean colorId={meeting.bodyColorId || 'blue'} size={68} />
+                <div className="mt-2 text-xl font-black text-white">{meeting.bodyVictimName || 'Crewmate'}</div>
+                <div className="flex items-center space-x-1 text-xs font-bold text-red-300 bg-red-900/80 border border-red-600/60 px-3 py-0.5 rounded-full mt-1">
+                  <MapPin className="w-3 h-3 text-red-400" />
+                  <span>{(meeting.bodyRoom || 'Ship Deck').toUpperCase()}</span>
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center bg-amber-950/60 border-2 border-amber-700/80 rounded-3xl p-4 shadow-xl">
+                <span className="text-[11px] font-black tracking-widest uppercase text-amber-300 mb-2 flex items-center space-x-1">
+                  <AlertTriangle className="w-3.5 h-3.5 text-amber-400 mr-1" />
+                  CAFETERIA BUTTON
+                </span>
+                <div className="w-16 h-16 rounded-full bg-red-600 border-4 border-red-400 flex items-center justify-center shadow-lg my-1 animate-pulse">
+                  <span className="text-xs font-black text-white">SOS</span>
+                </div>
+                <div className="mt-2 text-xl font-black text-white">Cafeteria Console</div>
+                <span className="text-xs font-bold text-amber-300 bg-amber-900/80 border border-amber-600/60 px-2.5 py-0.5 rounded-full mt-1">
+                  MANUAL ALARM
+                </span>
+              </div>
+            )}
+          </div>
+
+          {/* Subtext */}
+          <div className="mt-6 flex items-center space-x-2 text-slate-400 text-sm font-bold tracking-wider">
+            <div className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-ping" />
+            <span>CONNECTING AUDIO & VOTING CONSOLES...</span>
+          </div>
+        </div>
       </div>
     );
   }

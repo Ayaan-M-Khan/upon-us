@@ -39,15 +39,19 @@ export interface PlayerHat {
 
 export const PLAYER_HATS: PlayerHat[] = [
   { id: 'none', name: 'No Hat' },
+  { id: 'crown', name: 'Crown' },
+  { id: 'halo', name: 'Angel Halo' },
   { id: 'tophat', name: 'Top Hat' },
   { id: 'beanie', name: 'Beanie' },
-  { id: 'horns', name: 'Horns' },
+  { id: 'horns', name: 'Demon Horns' },
   { id: 'goggles', name: 'Goggles' },
-  { id: 'flower', name: 'Flower' },
-  { id: 'crown', name: 'Crown' },
   { id: 'antenna', name: 'Antenna' },
-  { id: 'chef', name: 'Chef Hat' },
+  { id: 'chef', name: 'Chef Toque' },
   { id: 'cowboy', name: 'Cowboy Hat' },
+  { id: 'party', name: 'Party Hat' },
+  { id: 'ninja', name: 'Ninja Headband' },
+  { id: 'flower', name: 'Sprout Flower' },
+  { id: 'egg', name: 'Fried Egg' },
 ];
 
 export type KillDistance = 'Short' | 'Medium' | 'Long';
