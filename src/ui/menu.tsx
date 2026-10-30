@@ -295,6 +295,13 @@ export const MainMenu: React.FC<MenuProps> = ({ onLobbyJoined, initialJoinCode }
                 </p>
               </div>
 
+              <div className="p-3.5 bg-amber-950/40 border border-amber-800/40 rounded-2xl">
+                <h4 className="font-black text-amber-300 mb-1">🛠️ ENGINEER ROLE</h4>
+                <p className="text-xs text-slate-300 leading-relaxed">
+                  Engineers are crewmates who can use ship vents for 6 seconds at a time. Their vent access recharges for 20 seconds after exiting.
+                </p>
+              </div>
+
               <div className="p-3.5 bg-slate-800/70 rounded-2xl border border-slate-700 space-y-2">
                 <h4 className="font-black text-yellow-300 uppercase tracking-wider text-xs">🎮 CONTROLS</h4>
                 <div className="grid grid-cols-2 gap-2 text-xs text-slate-300">
@@ -304,7 +311,9 @@ export const MainMenu: React.FC<MenuProps> = ({ onLobbyJoined, initialJoinCode }
                   <div><strong className="text-white">Q:</strong> Kill (Impostor)</div>
                   <div><strong className="text-white">R:</strong> Report Dead Body</div>
                   <div><strong className="text-white">F:</strong> Vent In / Out</div>
-                  <div><strong className="text-white">M / Tab:</strong> Open Map / Sabotage</div>
+                  <div><strong className="text-white">M / Tab:</strong> Open Map</div>
+                  <div><strong className="text-white">Sabotage:</strong> Choose a system from the HUD</div>
+                  <div><strong className="text-white">Touch:</strong> Virtual Joystick & HUD</div>
                   <div><strong className="text-white">V:</strong> Toggle 1st / 3rd Person</div>
                 </div>
               </div>

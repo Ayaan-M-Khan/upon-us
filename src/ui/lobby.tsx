@@ -664,21 +664,15 @@ export const LobbyView: React.FC<LobbyProps> = ({ onLeave }) => {
                     <span className="text-cyan-400 font-black">{lobby?.settings.playerSpeed}x</span>
                   </div>
                   {isHost ? (
-                    <div className="flex space-x-1.5">
-                      {[0.75, 1.0, 1.25, 1.5, 2.0].map((spd) => (
-                        <button
-                          key={spd}
-                          onClick={() => handleUpdateSetting('playerSpeed', spd)}
-                          className={`flex-1 py-1.5 rounded-xl font-black transition-all cursor-pointer border ${
-                            lobby?.settings.playerSpeed === spd
-                              ? 'bg-cyan-600 border-cyan-400 text-white shadow-md'
-                              : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white'
-                          }`}
-                        >
-                          {spd}x
-                        </button>
-                      ))}
-                    </div>
+                    <input
+                      type="range"
+                      min="0.5"
+                      max="3.0"
+                      step="0.25"
+                      value={lobby?.settings.playerSpeed ?? 1.0}
+                      onChange={(e) => handleUpdateSetting('playerSpeed', parseFloat(e.target.value))}
+                      className="w-full accent-cyan-400"
+                    />
                   ) : null}
                 </div>
 
@@ -689,21 +683,15 @@ export const LobbyView: React.FC<LobbyProps> = ({ onLeave }) => {
                     <span className="text-red-400 font-black">{lobby?.settings.killCooldown}s</span>
                   </div>
                   {isHost ? (
-                    <div className="flex space-x-1.5">
-                      {[15, 20, 25, 30, 45].map((cd) => (
-                        <button
-                          key={cd}
-                          onClick={() => handleUpdateSetting('killCooldown', cd)}
-                          className={`flex-1 py-1.5 rounded-xl font-black transition-all cursor-pointer border ${
-                            lobby?.settings.killCooldown === cd
-                              ? 'bg-red-600 border-red-400 text-white shadow-md'
-                              : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white'
-                          }`}
-                        >
-                          {cd}s
-                        </button>
-                      ))}
-                    </div>
+                    <input
+                      type="range"
+                      min="10"
+                      max="60"
+                      step="2.5"
+                      value={lobby?.settings.killCooldown ?? 25}
+                      onChange={(e) => handleUpdateSetting('killCooldown', parseFloat(e.target.value))}
+                      className="w-full accent-yellow-400"
+                    />
                   ) : null}
                 </div>
 
@@ -732,6 +720,43 @@ export const LobbyView: React.FC<LobbyProps> = ({ onLeave }) => {
                   ) : null}
                 </div>
 
+                {/* Vision Sliders */}
+                <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800 space-y-1.5">
+                  <div className="flex justify-between font-bold text-slate-300">
+                    <span>CREWMATE VISION</span>
+                    <span className="text-blue-400 font-black">{lobby?.settings.crewmateVision}x</span>
+                  </div>
+                  {isHost ? (
+                    <input
+                      type="range"
+                      min="0.25"
+                      max="3.0"
+                      step="0.25"
+                      value={lobby?.settings.crewmateVision ?? 1.0}
+                      onChange={(e) => handleUpdateSetting('crewmateVision', parseFloat(e.target.value))}
+                      className="w-full accent-blue-400"
+                    />
+                  ) : null}
+                </div>
+
+                <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800 space-y-1.5">
+                  <div className="flex justify-between font-bold text-slate-300">
+                    <span>IMPOSTOR VISION</span>
+                    <span className="text-red-400 font-black">{lobby?.settings.impostorVision}x</span>
+                  </div>
+                  {isHost ? (
+                    <input
+                      type="range"
+                      min="0.25"
+                      max="3.0"
+                      step="0.25"
+                      value={lobby?.settings.impostorVision ?? 1.5}
+                      onChange={(e) => handleUpdateSetting('impostorVision', parseFloat(e.target.value))}
+                      className="w-full accent-red-400"
+                    />
+                  ) : null}
+                </div>
+
                 {/* Tasks Configuration */}
                 <div className="bg-slate-950/70 p-3 rounded-2xl border border-slate-800 space-y-2">
                   <div className="flex justify-between font-black text-slate-300">
@@ -742,66 +767,30 @@ export const LobbyView: React.FC<LobbyProps> = ({ onLeave }) => {
                   </div>
                   {isHost ? (
                     <div className="grid grid-cols-3 gap-2">
-                      <div className="space-y-1">
-                        <span className="text-[10px] text-slate-400 font-bold">Common</span>
-                        <div className="flex space-x-1">
-                          {[0, 1, 2].map((n) => (
-                            <button
-                              key={n}
-                              onClick={() => handleUpdateSetting('commonTasks', n)}
-                              className={`flex-1 py-1 rounded-lg font-bold border ${
-                                lobby?.settings.commonTasks === n
-                                  ? 'bg-emerald-600 border-emerald-400 text-white'
-                                  : 'bg-slate-800 border-slate-700 text-slate-300'
-                              }`}
-                            >
-                              {n}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                      <div className="space-y-1">
-                        <span className="text-[10px] text-slate-400 font-bold">Short</span>
-                        <div className="flex space-x-1">
-                          {[1, 2, 3].map((n) => (
-                            <button
-                              key={n}
-                              onClick={() => handleUpdateSetting('shortTasks', n)}
-                              className={`flex-1 py-1 rounded-lg font-bold border ${
-                                lobby?.settings.shortTasks === n
-                                  ? 'bg-emerald-600 border-emerald-400 text-white'
-                                  : 'bg-slate-800 border-slate-700 text-slate-300'
-                              }`}
-                            >
-                              {n}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                      <div className="space-y-1">
-                        <span className="text-[10px] text-slate-400 font-bold">Long</span>
-                        <div className="flex space-x-1">
-                          {[0, 1, 2].map((n) => (
-                            <button
-                              key={n}
-                              onClick={() => handleUpdateSetting('longTasks', n)}
-                              className={`flex-1 py-1 rounded-lg font-bold border ${
-                                lobby?.settings.longTasks === n
-                                  ? 'bg-emerald-600 border-emerald-400 text-white'
-                                  : 'bg-slate-800 border-slate-700 text-slate-300'
-                              }`}
-                            >
-                              {n}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
+                      {([
+                        ['commonTasks', 'Common', 2],
+                        ['shortTasks', 'Short', 5],
+                        ['longTasks', 'Long', 3],
+                      ] as const).map(([setting, label, max]) => (
+                        <label key={setting} className="space-y-1">
+                          <span className="text-[10px] text-slate-400 font-bold">{label}</span>
+                          <input
+                            type="range"
+                            min="0"
+                            max={max}
+                            step="1"
+                            value={lobby?.settings[setting] ?? 0}
+                            onChange={(e) => handleUpdateSetting(setting, parseInt(e.target.value))}
+                            className="w-full accent-emerald-400"
+                          />
+                        </label>
+                      ))}
                     </div>
                   ) : null}
                 </div>
 
                 {/* Voting & Discussion Times */}
-                <div className="bg-slate-950/70 p-3 rounded-2xl border border-slate-800 space-y-1.5">
+                <div className="bg-slate-950/70 p-3 rounded-2xl border border-slate-800 space-y-2">
                   <div className="flex justify-between font-black text-slate-300">
                     <span>DISCUSSION & VOTING TIME</span>
                     <span className="text-amber-400 font-black">
@@ -809,48 +798,35 @@ export const LobbyView: React.FC<LobbyProps> = ({ onLeave }) => {
                     </span>
                   </div>
                   {isHost ? (
-                    <div className="grid grid-cols-2 gap-2 pt-1">
-                      <div>
-                        <span className="text-[10px] text-slate-400 font-bold">Discussion:</span>
-                        <div className="flex space-x-1 mt-0.5">
-                          {[0, 15, 30].map((t) => (
-                            <button
-                              key={t}
-                              onClick={() => handleUpdateSetting('discussionTime', t)}
-                              className={`flex-1 py-1 rounded-lg font-bold border ${
-                                lobby?.settings.discussionTime === t
-                                  ? 'bg-amber-600 border-amber-400 text-white'
-                                  : 'bg-slate-800 border-slate-700 text-slate-300'
-                              }`}
-                            >
-                              {t}s
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                      <div>
-                        <span className="text-[10px] text-slate-400 font-bold">Voting:</span>
-                        <div className="flex space-x-1 mt-0.5">
-                          {[60, 90, 120].map((t) => (
-                            <button
-                              key={t}
-                              onClick={() => handleUpdateSetting('votingTime', t)}
-                              className={`flex-1 py-1 rounded-lg font-bold border ${
-                                lobby?.settings.votingTime === t
-                                  ? 'bg-amber-600 border-amber-400 text-white'
-                                  : 'bg-slate-800 border-slate-700 text-slate-300'
-                              }`}
-                            >
-                              {t}s
-                            </button>
-                          ))}
-                        </div>
-                      </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <label className="space-y-1">
+                        <span className="text-[10px] text-slate-400 font-bold">Discussion</span>
+                        <input
+                          type="range"
+                          min="0"
+                          max="120"
+                          step="15"
+                          value={lobby?.settings.discussionTime ?? 15}
+                          onChange={(e) => handleUpdateSetting('discussionTime', parseInt(e.target.value))}
+                          className="w-full accent-amber-400"
+                        />
+                      </label>
+                      <label className="space-y-1">
+                        <span className="text-[10px] text-slate-400 font-bold">Voting</span>
+                        <input
+                          type="range"
+                          min="15"
+                          max="300"
+                          step="15"
+                          value={lobby?.settings.votingTime ?? 120}
+                          onChange={(e) => handleUpdateSetting('votingTime', parseInt(e.target.value))}
+                          className="w-full accent-amber-400"
+                        />
+                      </label>
                     </div>
                   ) : null}
                 </div>
 
-                {/* Fill empty seats with bots */}
                 <div className="bg-slate-950/70 p-3 rounded-2xl border border-slate-800 flex items-center justify-between font-black text-slate-300">
                   <span>AUTO-FILL EMPTY SEATS WITH BOTS</span>
                   {isHost ? (
@@ -883,6 +859,21 @@ export const LobbyView: React.FC<LobbyProps> = ({ onLeave }) => {
                     </button>
                   ) : (
                     <span>{lobby?.settings.confirmEjects ? 'ON' : 'OFF'}</span>
+                  )}
+                </div>
+                <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800 flex items-center justify-between font-bold text-slate-300">
+                  <span>VISUAL TASKS</span>
+                  {isHost ? (
+                    <button
+                      onClick={() => handleUpdateSetting('visualTasks', !lobby?.settings.visualTasks)}
+                      className={`px-3 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                        lobby?.settings.visualTasks ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-300'
+                      }`}
+                    >
+                      {lobby?.settings.visualTasks ? 'ON' : 'OFF'}
+                    </button>
+                  ) : (
+                    <span>{lobby?.settings.visualTasks ? 'ON' : 'OFF'}</span>
                   )}
                 </div>
               </div>

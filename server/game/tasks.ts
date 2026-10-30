@@ -12,7 +12,6 @@ export interface TaskStepDef {
   spot: number; // 0-3, see getRoomSpot
   hold: number; // seconds
 }
-
 export interface TaskDefinition {
   id: string;
   name: string;
@@ -100,4 +99,3 @@ export function pickPersonalTasks(shortCount: number, longCount: number): TaskDe
     return { ...task, steps: [...task.steps] };
   });
 }
-

@@ -6,6 +6,15 @@
 import * as THREE from 'three';
 import { PLAYER_COLORS } from '../../shared/constants';
 
+interface NameTagOptions {
+  name: string;
+  isHost?: boolean;
+  isLocal?: boolean;
+  isDead?: boolean;
+  isImpostor?: boolean;
+  isBot?: boolean;
+}
+
 export class CrewmateModel {
   public group: THREE.Group;
   public avatarGroup: THREE.Group;
@@ -22,6 +31,7 @@ export class CrewmateModel {
   public hatGroup: THREE.Group;
   public nameTagMesh: THREE.Mesh | null = null;
   public shadowMesh: THREE.Mesh;
+  public movementAura: THREE.Mesh;
 
   public isGhost: boolean = false;
   public isKilling: boolean = false;
@@ -31,8 +41,10 @@ export class CrewmateModel {
   public onDeathComplete?: () => void;
 
   private bodyMaterial: THREE.MeshStandardMaterial;
+  private legMaterial: THREE.MeshStandardMaterial;
   private walkTime: number = 0;
   private currentHatId: string = 'none';
+  private currentNameTag = '';
 
   constructor(colorId: string = 'red', hatId: string = 'none', playerName: string = 'Player', isHost: boolean = false) {
     this.group = new THREE.Group();
@@ -50,6 +62,8 @@ export class CrewmateModel {
       color: new THREE.Color(colorConfig.hex),
       roughness: 0.6,
       metalness: 0.1,
+      emissive: new THREE.Color(colorConfig.hex),
+      emissiveIntensity: 0,
     });
 
     // 2. Main Bean Body (Capsule)
@@ -117,7 +131,7 @@ export class CrewmateModel {
 
     // 6. Stubby Legs
     const legGeo = new THREE.CapsuleGeometry(0.18, 0.3, 12, 12);
-    const legMat = new THREE.MeshStandardMaterial({
+    this.legMaterial = new THREE.MeshStandardMaterial({
       color: new THREE.Color(colorConfig.hex).multiplyScalar(0.95),
       roughness: 0.7,
     });
@@ -125,7 +139,7 @@ export class CrewmateModel {
     // Left leg
     this.leftLeg = new THREE.Group();
     this.leftLeg.position.set(0, 0.4, 0.22);
-    const leftLegMesh = new THREE.Mesh(legGeo, legMat);
+    const leftLegMesh = new THREE.Mesh(legGeo, this.legMaterial);
     leftLegMesh.position.y = -0.15;
     leftLegMesh.castShadow = true;
     this.leftLeg.add(leftLegMesh);
@@ -134,7 +148,7 @@ export class CrewmateModel {
     // Right leg
     this.rightLeg = new THREE.Group();
     this.rightLeg.position.set(0, 0.4, -0.22);
-    const rightLegMesh = new THREE.Mesh(legGeo, legMat);
+    const rightLegMesh = new THREE.Mesh(legGeo, this.legMaterial);
     rightLegMesh.position.y = -0.15;
     rightLegMesh.castShadow = true;
     this.rightLeg.add(rightLegMesh);
@@ -152,6 +166,14 @@ export class CrewmateModel {
     this.shadowMesh.rotation.x = -Math.PI / 2;
     this.shadowMesh.position.y = 0.02;
     this.avatarGroup.add(this.shadowMesh);
+
+    this.movementAura = new THREE.Mesh(
+      new THREE.TorusGeometry(0.62, 0.035, 6, 24),
+      new THREE.MeshBasicMaterial({ color: 0x67e8f9, transparent: true, opacity: 0, depthWrite: false })
+    );
+    this.movementAura.rotation.x = -Math.PI / 2;
+    this.movementAura.position.y = 0.035;
+    this.group.add(this.movementAura);
 
     // 8. Ghostly Wavy Tail (hovering phantom body when dead)
     this.ghostTailGroup = new THREE.Group();
@@ -229,6 +251,8 @@ export class CrewmateModel {
   public setColor(colorId: string): void {
     const colorConfig = PLAYER_COLORS.find((c) => c.id === colorId) || PLAYER_COLORS[0];
     this.bodyMaterial.color.set(colorConfig.hex);
+    this.bodyMaterial.emissive.set(colorConfig.hex);
+    this.legMaterial.color.set(new THREE.Color(colorConfig.hex).multiplyScalar(0.95));
     (this.backpackMesh.material as THREE.MeshStandardMaterial).color.set(
       new THREE.Color(colorConfig.hex).multiplyScalar(0.9)
     );
@@ -242,6 +266,11 @@ export class CrewmateModel {
     while (this.hatGroup.children.length > 0) {
       const child = this.hatGroup.children[0];
       this.hatGroup.remove(child);
+      if (child instanceof THREE.Mesh) {
+        child.geometry.dispose();
+        const materials = Array.isArray(child.material) ? child.material : [child.material];
+        materials.forEach((material) => material.dispose());
+      }
     }
 
     if (hatId === 'tophat') {
@@ -357,6 +386,17 @@ export class CrewmateModel {
           this.hatGroup.add(jewel);
         }
       }
+    } else if (hatId === 'antenna') {
+      const metal = new THREE.MeshStandardMaterial({ color: 0xcbd5e1, metalness: 0.65, roughness: 0.25 });
+      const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.04, 0.42, 8), metal);
+      stem.position.y = 0.2;
+      this.hatGroup.add(stem);
+      const bulb = new THREE.Mesh(
+        new THREE.SphereGeometry(0.11, 12, 8),
+        new THREE.MeshStandardMaterial({ color: 0xfb7185, emissive: 0xbe123c, emissiveIntensity: 0.8 })
+      );
+      bulb.position.y = 0.43;
+      this.hatGroup.add(bulb);
     } else if (hatId === 'halo') {
       // Angel Glowing Halo
       const haloGeo = new THREE.TorusGeometry(0.34, 0.045, 12, 32);
@@ -448,17 +488,20 @@ export class CrewmateModel {
     }
   }
 
-  public updateNameTag(
-    nameOrOptions: string | { name: string; isHost?: boolean; isLocal?: boolean; isDead?: boolean; isImpostor?: boolean; isBot?: boolean },
-    isHostParam: boolean = false
-  ): void {
-    const name = typeof nameOrOptions === 'string' ? nameOrOptions : nameOrOptions.name;
-    const isHost = typeof nameOrOptions === 'string' ? isHostParam : (nameOrOptions.isHost ?? false);
-    const isImpostor = typeof nameOrOptions === 'object' && nameOrOptions.isImpostor;
+  public updateNameTag(player: string | NameTagOptions, host = false): void {
+    const options = typeof player === 'string' ? { name: player, isHost: host } : player;
+    const tagKey = `${options.name}:${!!options.isHost}:${!!options.isLocal}:${!!options.isDead}:${!!options.isImpostor}:${!!options.isBot}`;
+    if (tagKey === this.currentNameTag) return;
+    this.currentNameTag = tagKey;
+    const name = options.name;
+    const isHost = !!options.isHost;
+    const isImpostor = !!options.isImpostor;
 
     if (this.nameTagMesh) {
       this.group.remove(this.nameTagMesh);
       if (this.nameTagMesh.material instanceof THREE.Material) {
+        const map = (this.nameTagMesh.material as THREE.MeshBasicMaterial).map;
+        map?.dispose();
         this.nameTagMesh.material.dispose();
       }
       this.nameTagMesh = null;
@@ -573,7 +616,18 @@ export class CrewmateModel {
     this.onDeathComplete = onComplete;
   }
 
-  public updateAnimation(delta: number, isMoving: boolean, _camera?: THREE.Camera): void {
+  public updateAnimation(delta: number, isMoving: boolean, camera?: THREE.Camera): void {
+    const auraMaterial = this.movementAura.material as THREE.MeshBasicMaterial;
+    auraMaterial.opacity = THREE.MathUtils.damp(auraMaterial.opacity, isMoving ? 0.42 : 0, 9, delta);
+    if (!this.isGhost) {
+      this.bodyMaterial.emissiveIntensity = THREE.MathUtils.damp(
+        this.bodyMaterial.emissiveIntensity,
+        isMoving ? 0.1 : 0,
+        7,
+        delta
+      );
+    }
+
     // 1. Killer Strike Animation
     if (this.isKilling) {
       this.killAnimTimer -= delta;
@@ -660,8 +714,8 @@ export class CrewmateModel {
     } else {
       // Idle breathing sway
       this.walkTime += delta * 2;
-      this.leftLeg.rotation.z = THREE.MathUtils.lerp(this.leftLeg.rotation.z, 0, 0.2);
-      this.rightLeg.rotation.z = THREE.MathUtils.lerp(this.rightLeg.rotation.z, 0, 0.2);
+      this.leftLeg.rotation.z = THREE.MathUtils.damp(this.leftLeg.rotation.z, 0, 10, delta);
+      this.rightLeg.rotation.z = THREE.MathUtils.damp(this.rightLeg.rotation.z, 0, 10, delta);
 
       const breath = Math.sin(this.walkTime) * 0.02;
       this.bodyMesh.position.y = 0.95 + breath;
@@ -671,6 +725,12 @@ export class CrewmateModel {
       if (this.highlightMesh) this.highlightMesh.position.y = 1.16 + breath;
       if (this.highlightSecondaryMesh) this.highlightSecondaryMesh.position.y = 1.13 + breath;
       this.hatGroup.position.y = 1.55 + breath;
+    }
+    this.hatGroup.rotation.z = THREE.MathUtils.damp(this.hatGroup.rotation.z, isMoving ? -0.07 : 0, 5, delta);
+
+    // Billboard name tag to face camera
+    if (this.nameTagMesh && camera) {
+      this.nameTagMesh.quaternion.copy(camera.quaternion);
     }
   }
 

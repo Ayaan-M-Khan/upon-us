@@ -11,15 +11,17 @@ type Pt = { x: number; z: number };
 function nearestWalkable(x: number, z: number): { i: number; j: number } | null {
   const c = worldToCell(x, z);
   if (navWalkable(c.i, c.j)) return c;
-  for (let r = 1; r < 8; r++) {
-    for (let dj = -r; dj <= r; dj++) {
-      for (let di = -r; di <= r; di++) {
-        if (Math.max(Math.abs(di), Math.abs(dj)) !== r) continue;
-        if (navWalkable(c.i + di, c.j + dj)) return { i: c.i + di, j: c.j + dj };
-      }
+  let nearest: { i: number; j: number } | null = null;
+  let nearestDistanceSq = Infinity;
+  for (let dj = -8; dj <= 8; dj++) {
+    for (let di = -8; di <= 8; di++) {
+      const distanceSq = di * di + dj * dj;
+      if (distanceSq >= nearestDistanceSq || !navWalkable(c.i + di, c.j + dj)) continue;
+      nearest = { i: c.i + di, j: c.j + dj };
+      nearestDistanceSq = distanceSq;
     }
   }
-  return null;
+  return nearest;
 }
 
 /** True if a straight line between two points stays on safe (eroded) floor. */
@@ -37,7 +39,7 @@ export function hasClearLine(a: Pt, b: Pt): boolean {
 export function findPath(from: Pt, to: Pt): Pt[] {
   const start = nearestWalkable(from.x, from.z);
   const goal = nearestWalkable(to.x, to.z);
-  if (!start || !goal) return [to];
+  if (!start || !goal) return [];
 
   const idx = (i: number, j: number) => j * GRID.cols + i;
   const startIdx = idx(start.i, start.j);
@@ -111,7 +113,7 @@ export function findPath(from: Pt, to: Pt): Pt[] {
       }
     }
   }
-  if (!found) return [to];
+  if (!found) return [];
 
   const cells: Pt[] = [];
   let c = goalIdx;
@@ -137,6 +139,7 @@ export function findPath(from: Pt, to: Pt): Pt[] {
     anchor = cells[far];
     k = far + 1;
   }
-  result.push(to);
+  const safeGoal = cellToWorld(goal.i, goal.j);
+  result.push(hasClearLine(anchor, to) ? to : safeGoal);
   return result;
 }

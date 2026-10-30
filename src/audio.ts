@@ -14,6 +14,10 @@ class SoundEngine {
   public ambientVolume: number = 0.4;
   private ambientOsc: OscillatorNode | null = null;
   private ambientGain: GainNode | null = null;
+  private sabotageAlarmOsc: OscillatorNode | null = null;
+  private sabotageAlarmModulator: OscillatorNode | null = null;
+  private sabotageAlarmModulation: GainNode | null = null;
+  private sabotageAlarmGain: GainNode | null = null;
 
   // Footstep throttle tracker
   private lastFootstepTimes: Map<string, number> = new Map();
@@ -305,6 +309,51 @@ class SoundEngine {
       osc.start(now);
       osc.stop(now + (highPitch ? 0.4 : 0.15));
     } catch {}
+  }
+
+  public setSabotageAlarm(active: boolean): void {
+    if (active) {
+      if (this.sabotageAlarmOsc) return;
+      try {
+        const ctx = this.initCtx();
+        const siren = ctx.createOscillator();
+        const modulator = ctx.createOscillator();
+        const modulation = ctx.createGain();
+        const gain = ctx.createGain();
+
+        siren.type = 'sawtooth';
+        siren.frequency.setValueAtTime(780, ctx.currentTime);
+        modulator.type = 'triangle';
+        modulator.frequency.setValueAtTime(1.1, ctx.currentTime);
+        modulation.gain.setValueAtTime(250, ctx.currentTime);
+        gain.gain.setValueAtTime(0.22 * this.masterVolume * this.sfxVolume, ctx.currentTime);
+
+        modulator.connect(modulation);
+        modulation.connect(siren.frequency);
+        siren.connect(gain);
+        gain.connect(ctx.destination);
+        this.sabotageAlarmOsc = siren;
+        this.sabotageAlarmModulator = modulator;
+        this.sabotageAlarmModulation = modulation;
+        this.sabotageAlarmGain = gain;
+        siren.start();
+        modulator.start();
+      } catch {
+        this.setSabotageAlarm(false);
+      }
+      return;
+    }
+
+    this.sabotageAlarmOsc?.stop();
+    this.sabotageAlarmOsc?.disconnect();
+    this.sabotageAlarmModulator?.stop();
+    this.sabotageAlarmModulator?.disconnect();
+    this.sabotageAlarmModulation?.disconnect();
+    this.sabotageAlarmGain?.disconnect();
+    this.sabotageAlarmOsc = null;
+    this.sabotageAlarmModulator = null;
+    this.sabotageAlarmModulation = null;
+    this.sabotageAlarmGain = null;
   }
 
   public playTaskComplete(): void {
