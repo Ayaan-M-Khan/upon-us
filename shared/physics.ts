@@ -258,7 +258,7 @@ export function lineIntersectsWalls(
   let bestPoint: { x: number; z: number } | undefined = undefined;
 
   for (const wall of walls) {
-    const denom = (z2 - z1) * (wall.x2 - wall.x1) - (x2 - x1) * (wall.z2 - wall.z1);
+    const denom = (x2 - x1) * (wall.z2 - wall.z1) - (z2 - z1) * (wall.x2 - wall.x1);
     if (Math.abs(denom) < 0.00001) continue;
 
     const ua = ((wall.x2 - wall.x1) * (z1 - wall.z1) - (wall.z2 - wall.z1) * (x1 - wall.x1)) / denom;

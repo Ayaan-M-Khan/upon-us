@@ -397,7 +397,7 @@ export const GameHud: React.FC<GameHudProps> = ({
         soundEngine.playClick();
         setShowMap((prev) => !prev);
       } else if (e.code === 'KeyC') {
-        if (isImpostor && playing && alive && !inVent) {
+        if (isImpostor && playing) {
           e.preventDefault();
           soundEngine.playClick();
           setShowSabotageModal((prev) => !prev);
@@ -415,7 +415,7 @@ export const GameHud: React.FC<GameHudProps> = ({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isImpostor, playing, alive, inVent, onToggleCamera]);
+  }, [isImpostor, playing, onToggleCamera]);
 
   const workPct = work ? Math.min(100, ((now - work.startedAt) / (work.hold * 1000)) * 100) : 0;
   const commsJammed = snapshot?.sabotage?.type === 'comms';
@@ -630,7 +630,7 @@ export const GameHud: React.FC<GameHudProps> = ({
         <div className="flex flex-col items-start space-y-2">
           {coarse && <Joystick onChange={onJoystick} />}
           <div className="bg-slate-900/80 backdrop-blur-md p-3 rounded-2xl border border-slate-800 text-xs text-slate-400 font-medium hidden md:block">
-            <div><strong className="text-cyan-300">WASD / Arrows:</strong> Walk • <strong className="text-yellow-300">Shift:</strong> Sprint</div>
+            <div><strong className="text-cyan-300">WASD / Arrows:</strong> Walk</div>
             <div><strong className="text-cyan-300">Mouse Drag:</strong> Orbit Camera</div>
             <div><strong className="text-cyan-300">E / Space:</strong> Use • <strong className="text-cyan-300">R:</strong> Report</div>
             {isImpostor && <div><strong className="text-red-300">Q:</strong> Kill • <strong className="text-red-300">F:</strong> Vent</div>}
@@ -647,7 +647,7 @@ export const GameHud: React.FC<GameHudProps> = ({
                 tone="sabotage"
                 label="SABOTAGE"
                 hint="[C]"
-                enabled={!!playing && alive && !inVent && (snapshot?.you?.sabotageCooldownSecs ?? 0) <= 0 && !snapshot?.sabotage}
+                enabled={!!playing}
                 badge={(snapshot?.you?.sabotageCooldownSecs ?? 0) > 0 ? String(snapshot?.you?.sabotageCooldownSecs) : undefined}
                 onClick={() => setShowSabotageModal(true)}
                 icon={<AlertTriangle className="w-7 h-7 mb-0.5" />}
@@ -919,7 +919,7 @@ export const GameHud: React.FC<GameHudProps> = ({
       )}
 
       {/* Impostor Sabotage Grid Modal */}
-      {showSabotageModal && (
+      {showSabotageModal && playing && (
         <SabotageModal
           cooldownSecs={snapshot?.you?.sabotageCooldownSecs ?? 0}
           activeSabotageType={snapshot?.sabotage?.type}

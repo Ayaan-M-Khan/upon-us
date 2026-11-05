@@ -45,13 +45,14 @@ export const PLAYER_HATS: PlayerHat[] = [
   { id: 'beanie', name: 'Beanie' },
   { id: 'horns', name: 'Demon Horns' },
   { id: 'goggles', name: 'Goggles' },
-  { id: 'antenna', name: 'Antenna' },
   { id: 'chef', name: 'Chef Toque' },
   { id: 'cowboy', name: 'Cowboy Hat' },
   { id: 'party', name: 'Party Hat' },
   { id: 'ninja', name: 'Ninja Headband' },
   { id: 'flower', name: 'Sprout Flower' },
   { id: 'egg', name: 'Fried Egg' },
+  { id: 'antenna', name: 'Signal Antenna' },
+  { id: 'engineer', name: 'Engineering Helmet' },
 ];
 
 export type KillDistance = 'Short' | 'Medium' | 'Long';

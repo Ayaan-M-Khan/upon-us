@@ -25,12 +25,12 @@ export function createGameServer() {
 
   io.on('connection', (socket) => {
     // Lobby creation & joining
-    socket.on(EVENTS.CREATE_LOBBY, (data: { playerName: string; isPrivate?: boolean }) => {
-      lobbyManager.createLobby(socket, data?.playerName || 'Crewmate', data?.isPrivate || false);
+    socket.on(EVENTS.CREATE_LOBBY, (data: { playerName: string; isPrivate?: boolean; hatId?: string }) => {
+      lobbyManager.createLobby(socket, data?.playerName || 'Crewmate', data?.isPrivate || false, data?.hatId);
     });
 
-    socket.on(EVENTS.JOIN_LOBBY, (data: { code: string; playerName: string }) => {
-      lobbyManager.joinLobby(socket, data?.code || '', data?.playerName || 'Crewmate');
+    socket.on(EVENTS.JOIN_LOBBY, (data: { code: string; playerName: string; hatId?: string }) => {
+      lobbyManager.joinLobby(socket, data?.code || '', data?.playerName || 'Crewmate', data?.hatId);
     });
 
     socket.on(EVENTS.LEAVE_LOBBY, () => {
@@ -86,7 +86,13 @@ export function createGameServer() {
     socket.on(EVENTS.CAST_VOTE, (d: { targetId: string }) => room()?.castVote(socket.id, String(d?.targetId)));
     socket.on(EVENTS.CHAT_MESSAGE, (d: { text: string }) => room()?.chat(socket.id, String(d?.text ?? '')));
     socket.on(EVENTS.SABOTAGE, (d: { type: import('../shared/events').SabotageType; room?: string }) => room()?.triggerSabotage(socket.id, d?.type, d?.room));
-    socket.on(EVENTS.FIX_SABOTAGE, (d: { partId?: number }) => room()?.fixSabotage(socket.id, d?.partId));
+    socket.on(EVENTS.FIX_SABOTAGE, (d: { partId?: number; holding?: boolean }) => {
+      if (typeof d?.holding === 'boolean' && typeof d.partId === 'number') {
+        room()?.holdReactorScanner(socket.id, d.partId, d.holding);
+      } else {
+        room()?.fixSabotage(socket.id, d?.partId);
+      }
+    });
 
     socket.on('disconnect', () => {
       lobbyManager.leaveLobby(socket);

@@ -103,7 +103,7 @@ export class LobbyManager {
     return code;
   }
 
-  public createLobby(socket: Socket, playerName: string, isPrivate: boolean = false): void {
+  public createLobby(socket: Socket, playerName: string, isPrivate: boolean = false, hatId?: string): void {
     // Leave any existing lobby first
     this.leaveLobby(socket);
 
@@ -116,7 +116,7 @@ export class LobbyManager {
       id: socket.id,
       name: uniqueName,
       colorId,
-      hatId: 'none',
+      hatId: PLAYER_HATS.find((hat) => hat.id === hatId)?.id ?? 'none',
       isHost: true,
       x: 0,
       z: 0,
@@ -132,7 +132,7 @@ export class LobbyManager {
     socket.emit(EVENTS.LOBBY_STATE, lobby.toJSON());
   }
 
-  public joinLobby(socket: Socket, codeRaw: string, playerName: string): void {
+  public joinLobby(socket: Socket, codeRaw: string, playerName: string, hatId?: string): void {
     this.leaveLobby(socket);
 
     const code = (codeRaw || '').trim().toUpperCase();
@@ -164,7 +164,7 @@ export class LobbyManager {
       id: socket.id,
       name: uniqueName,
       colorId,
-      hatId: 'none',
+      hatId: PLAYER_HATS.find((hat) => hat.id === hatId)?.id ?? 'none',
       isHost: false,
       x: spawnX,
       z: spawnZ,

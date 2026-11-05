@@ -2,6 +2,7 @@
  * Impostor Protocol - Full Sabotage System
  */
 
+import { MAP_DOORS } from '../../shared/mapData';
 import { SabotageType, SabotagePartState, SabotageStateView } from '../../shared/events';
 
 export const SABOTAGE_LOCATIONS = {
@@ -15,7 +16,7 @@ export const SABOTAGE_LOCATIONS = {
 
 export const SABOTAGE_COOLDOWN_MS = 25000;
 export const DOOR_LOCK_MS = 10000;
-export const CRITICAL_SABOTAGE_SECS = 45;
+export const CRITICAL_SABOTAGE_SECS = 30;
 
 export interface InternalActiveSabotage {
   type: SabotageType;
@@ -30,6 +31,7 @@ export interface InternalActiveSabotage {
 export class SabotageManager {
   private activeSabotage: InternalActiveSabotage | null = null;
   private doorLocks: Map<string, number> = new Map(); // room -> expiresAt
+  private doorCooldowns = new Map<string, number>();
   private cooldownUntil: number = 0;
 
   constructor() {
@@ -68,14 +70,15 @@ export class SabotageManager {
   public triggerSabotage(type: SabotageType, room?: string, now: number = Date.now()): boolean {
     // If doors sabotage:
     if (type === 'doors') {
-      const targetRoom = room || 'cafeteria';
-      this.doorLocks.set(targetRoom, now + DOOR_LOCK_MS);
-      this.cooldownUntil = Math.max(this.cooldownUntil, now + 12000);
+      if (this.activeSabotage || !room || !MAP_DOORS.some((door) => door.roomId === room)) return false;
+      if (now < (this.doorCooldowns.get(room) ?? 0)) return false;
+      this.doorLocks.set(room, now + DOOR_LOCK_MS);
+      this.doorCooldowns.set(room, now + 30000);
       return true;
     }
 
     // For shipwide systems: cannot trigger if already active or on cooldown
-    if (this.activeSabotage || now < this.cooldownUntil) {
+    if (this.activeSabotage || now < this.cooldownUntil || this.getLockedRooms(now).length > 0) {
       return false;
     }
 
@@ -132,7 +135,8 @@ export class SabotageManager {
   }
 
   public fixPart(partId: number, playerPos: { x: number; z: number }, now: number = Date.now()): boolean {
-    if (!this.activeSabotage) return false;
+    if (!this.activeSabotage || this.activeSabotage.type === 'reactor'
+      || (this.activeSabotage.isCritical && now >= this.activeSabotage.endsAt)) return false;
 
     const part = this.activeSabotage.parts.find((p) => p.id === partId);
     if (!part || part.resolved) return false;
@@ -159,7 +163,7 @@ export class SabotageManager {
   }
 
   public clearOnMeeting(now: number = Date.now()): void {
-    this.activeSabotage = null;
+    if (this.activeSabotage?.isCritical) this.activeSabotage = null;
     this.doorLocks.clear();
     this.cooldownUntil = now + 15000;
   }

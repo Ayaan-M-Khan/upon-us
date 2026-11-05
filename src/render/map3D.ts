@@ -8,6 +8,7 @@ import * as THREE from 'three';
 import {
   CAFETERIA_TABLE_CENTER,
   MAP_CORRIDORS,
+  MAP_DOORS,
   MAP_ROOMS_DETAIL,
   MAP_VENTS,
   MAP_WALLS,
@@ -24,6 +25,7 @@ export class Map3D {
   private dustParticles: THREE.Points | null = null;
   private animatedProps: Array<(delta: number, elapsed: number) => void> = [];
   private elapsed: number = 0;
+  private doors = new Map<THREE.Mesh, string>();
 
   // Fog of war room shrouds (conceal rooms from outside)
   private roomShrouds: Map<string, {
@@ -43,6 +45,7 @@ export class Map3D {
     this.buildFloors();
     this.buildCorridors();
     this.buildWalls();
+    this.buildDoors();
     this.buildOuterHull();
     this.buildRoomProps();
     this.buildRoomShrouds();
@@ -147,6 +150,25 @@ export class Map3D {
     return texture;
   }
 
+  private buildDoors(): void {
+    const material = new THREE.MeshStandardMaterial({
+      color: 0x7f1d1d, emissive: 0x450a0a, roughness: 0.55, metalness: 0.5,
+    });
+    for (const { roomId, wall } of MAP_DOORS) {
+      const length = Math.hypot(wall.x2 - wall.x1, wall.z2 - wall.z1);
+      const door = new THREE.Mesh(new THREE.BoxGeometry(length, 2.3, 0.28), material);
+      door.position.set((wall.x1 + wall.x2) / 2, 1.15, (wall.z1 + wall.z2) / 2);
+      door.rotation.y = -Math.atan2(wall.z2 - wall.z1, wall.x2 - wall.x1);
+      door.visible = false;
+      this.group.add(door);
+      this.doors.set(door, roomId);
+    }
+  }
+
+  public setDoorLocks(lockedRooms: string[]): void {
+    for (const [door, roomId] of this.doors) door.visible = lockedRooms.includes(roomId);
+  }
+
   private buildFloors(): void {
     const floorGroup = new THREE.Group();
 
@@ -171,6 +193,33 @@ export class Map3D {
         floorMesh.receiveShadow = true;
         floorGroup.add(floorMesh);
       });
+
+      const sign = document.createElement('canvas');
+      sign.width = 512;
+      sign.height = 96;
+      const ctx = sign.getContext('2d');
+      if (ctx) {
+        ctx.fillStyle = '#0b1220';
+        ctx.fillRect(0, 0, sign.width, sign.height);
+        ctx.fillStyle = room.color;
+        ctx.fillRect(0, 0, 14, sign.height);
+        ctx.fillRect(0, sign.height - 5, sign.width, 5);
+        ctx.fillStyle = '#e2e8f0';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.font = 'bold 44px monospace';
+        ctx.fillText(room.name.toUpperCase(), 256, 48, 454);
+
+        const map = new THREE.CanvasTexture(sign);
+        map.colorSpace = THREE.SRGBColorSpace;
+        const marker = new THREE.Mesh(
+          new THREE.PlaneGeometry(4.8, 0.9),
+          new THREE.MeshBasicMaterial({ map }),
+        );
+        marker.rotation.x = -Math.PI / 2;
+        marker.position.set(room.labelPos.x, 0.015, room.labelPos.z);
+        floorGroup.add(marker);
+      }
 
       // Atmospheric room center point light with calibrated color from room identity
       const roomLight = new THREE.PointLight(new THREE.Color(room.color), 0.85, 20, 1.2);
@@ -1746,14 +1795,14 @@ export class Map3D {
     }
   }
 
-  public setRoomVisibility(currentRoom: string, isGhost: boolean, cameraActiveZone?: Rect, playerPos?: { x: number; z: number }): void {
+  public setRoomVisibility(currentRoom: string, isGhost: boolean, cameraActiveZone?: Rect, playerPos?: { x: number; z: number }, visibleRooms?: ReadonlySet<string>): void {
     const PEEK_RADIUS = 4.8; // Distance around character to peek into rooms
     for (const [name, shroud] of this.roomShrouds) {
       if (isGhost) {
         // Ethereal ghosts see through all walls and roofs
         shroud.targetOpacity = 0.12;
-      } else if (name === currentRoom) {
-        // You are inside this room - fully transparent view!
+      } else if (name === currentRoom || visibleRooms?.has(name)) {
+        // Keep the room clear when a player or body is in direct view.
         shroud.targetOpacity = 0.0;
       } else {
         // Check if camera feed is viewing this room

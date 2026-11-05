@@ -22,7 +22,7 @@ export const SabotageModal: React.FC<SabotageModalProps> = ({
   lockedRooms = [],
   onClose,
 }) => {
-  const canSabotageSystems = cooldownSecs <= 0 && !activeSabotageType;
+  const canSabotageSystems = cooldownSecs <= 0 && !activeSabotageType && lockedRooms.length === 0;
 
   const trigger = (type: SabotageType, room?: string) => {
     soundEngine.playClick();
@@ -35,9 +35,9 @@ export const SabotageModal: React.FC<SabotageModalProps> = ({
     { id: 'medbay', name: 'Medbay' },
     { id: 'electrical', name: 'Electrical' },
     { id: 'storage', name: 'Storage' },
-    { id: 'reactor', name: 'Reactor' },
+    { id: 'upper_engine', name: 'Upper Engine' },
+    { id: 'lower_engine', name: 'Lower Engine' },
     { id: 'security', name: 'Security' },
-    { id: 'admin', name: 'Admin' },
   ];
 
   return (
@@ -110,7 +110,7 @@ export const SabotageModal: React.FC<SabotageModalProps> = ({
                   </span>
                 </div>
                 <p className="text-xs text-slate-400 mt-1 leading-snug">
-                  Forces 45s countdown timer. Requires two players holding scanners simultaneously to fix.
+                  Forces 30s countdown timer. Requires two players holding scanners simultaneously to fix.
                 </p>
               </div>
             </button>
@@ -136,7 +136,7 @@ export const SabotageModal: React.FC<SabotageModalProps> = ({
                   </span>
                 </div>
                 <p className="text-xs text-slate-400 mt-1 leading-snug">
-                  Cuts life support. 45s countdown. Requires numeric PIN override in O2 and Admin.
+                  Cuts life support. 30s countdown. Requires numeric PIN override in O2 and Admin.
                 </p>
               </div>
             </button>
@@ -206,7 +206,7 @@ export const SabotageModal: React.FC<SabotageModalProps> = ({
               return (
                 <button
                   key={rm.id}
-                  disabled={isLocked}
+                  disabled={isLocked || !!activeSabotageType}
                   onClick={() => trigger('doors', rm.id)}
                   className={`p-2.5 rounded-xl border-2 flex items-center justify-between font-bold text-xs transition-all ${
                     isLocked

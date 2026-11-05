@@ -43,6 +43,7 @@ export class CrewmateModel {
   private bodyMaterial: THREE.MeshStandardMaterial;
   private legMaterial: THREE.MeshStandardMaterial;
   private walkTime: number = 0;
+  private walkBlend = 0;
   private currentHatId: string = 'none';
   private currentNameTag = '';
 
@@ -75,14 +76,15 @@ export class CrewmateModel {
     this.avatarGroup.add(this.bodyMesh);
 
     // 3. Backpack (Oxygen Tank)
-    const backpackGeo = new THREE.BoxGeometry(0.35, 0.6, 0.65);
+    const backpackGeo = new THREE.CapsuleGeometry(0.22, 0.32, 8, 12);
     const backpackMat = new THREE.MeshStandardMaterial({
       color: new THREE.Color(colorConfig.hex).multiplyScalar(0.9),
       roughness: 0.7,
       metalness: 0.05,
     });
     this.backpackMesh = new THREE.Mesh(backpackGeo, backpackMat);
-    this.backpackMesh.position.set(-0.4, 0.95, 0); // Sits on back (pointing -X in avatar local space)
+    this.backpackMesh.scale.set(0.85, 1, 1.38);
+    this.backpackMesh.position.set(-0.48, 0.95, 0); // Sits on back (pointing -X in avatar local space)
     this.backpackMesh.castShadow = true;
     this.avatarGroup.add(this.backpackMesh);
 
@@ -266,14 +268,43 @@ export class CrewmateModel {
     while (this.hatGroup.children.length > 0) {
       const child = this.hatGroup.children[0];
       this.hatGroup.remove(child);
-      if (child instanceof THREE.Mesh) {
-        child.geometry.dispose();
-        const materials = Array.isArray(child.material) ? child.material : [child.material];
-        materials.forEach((material) => material.dispose());
-      }
+      child.traverse((object) => {
+        if (object instanceof THREE.Mesh) {
+          object.geometry.dispose();
+          for (const material of [object.material].flat()) material.dispose();
+        }
+      });
     }
 
-    if (hatId === 'tophat') {
+    if (hatId === 'antenna') {
+      const stem = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.025, 0.045, 0.42, 10),
+        new THREE.MeshStandardMaterial({ color: 0x475569, metalness: 0.55 }),
+      );
+      stem.position.y = 0.32;
+      stem.rotation.z = -0.22;
+      this.hatGroup.add(stem);
+      const beacon = new THREE.Mesh(
+        new THREE.SphereGeometry(0.1, 14, 10),
+        new THREE.MeshStandardMaterial({ color: 0x67e8f9, emissive: 0x0891b2, emissiveIntensity: 1.3 }),
+      );
+      beacon.position.set(0.047, 0.53, 0);
+      this.hatGroup.add(beacon);
+    } else if (hatId === 'engineer') {
+      const shell = new THREE.Mesh(
+        new THREE.SphereGeometry(0.49, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2),
+        new THREE.MeshStandardMaterial({ color: 0xfbbf24, roughness: 0.45 }),
+      );
+      shell.position.y = 0.08;
+      shell.scale.y = 0.63;
+      this.hatGroup.add(shell);
+      const brim = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.51, 0.51, 0.07, 24),
+        new THREE.MeshStandardMaterial({ color: 0xb45309, roughness: 0.65 }),
+      );
+      brim.position.y = 0.08;
+      this.hatGroup.add(brim);
+    } else if (hatId === 'tophat') {
       const brimGeo = new THREE.CylinderGeometry(0.42, 0.42, 0.05, 16);
       const brimMat = new THREE.MeshStandardMaterial({ color: 0x1f2937, roughness: 0.5 });
       const brim = new THREE.Mesh(brimGeo, brimMat);
@@ -386,17 +417,6 @@ export class CrewmateModel {
           this.hatGroup.add(jewel);
         }
       }
-    } else if (hatId === 'antenna') {
-      const metal = new THREE.MeshStandardMaterial({ color: 0xcbd5e1, metalness: 0.65, roughness: 0.25 });
-      const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.04, 0.42, 8), metal);
-      stem.position.y = 0.2;
-      this.hatGroup.add(stem);
-      const bulb = new THREE.Mesh(
-        new THREE.SphereGeometry(0.11, 12, 8),
-        new THREE.MeshStandardMaterial({ color: 0xfb7185, emissive: 0xbe123c, emissiveIntensity: 0.8 })
-      );
-      bulb.position.y = 0.43;
-      this.hatGroup.add(bulb);
     } else if (hatId === 'halo') {
       // Angel Glowing Halo
       const haloGeo = new THREE.TorusGeometry(0.34, 0.045, 12, 32);
@@ -695,37 +715,22 @@ export class CrewmateModel {
       return;
     }
 
-    // 4. Alive Living Mode: Normal leg kinematics and breathing
-    if (isMoving) {
-      this.walkTime += delta * 12;
-      const legSwing = Math.sin(this.walkTime) * 0.45;
-      this.leftLeg.rotation.z = legSwing;
-      this.rightLeg.rotation.z = -legSwing;
-
-      // Subtle body bob
-      const bob = Math.abs(Math.sin(this.walkTime * 2)) * 0.05;
-      this.bodyMesh.position.y = 0.95 + bob;
-      this.backpackMesh.position.y = 0.95 + bob;
-      this.visorMesh.position.y = 1.05 + bob;
-      this.visorFrameMesh.position.y = 1.05 + bob;
-      if (this.highlightMesh) this.highlightMesh.position.y = 1.16 + bob;
-      if (this.highlightSecondaryMesh) this.highlightSecondaryMesh.position.y = 1.13 + bob;
-      this.hatGroup.position.y = 1.55 + bob;
-    } else {
-      // Idle breathing sway
-      this.walkTime += delta * 2;
-      this.leftLeg.rotation.z = THREE.MathUtils.damp(this.leftLeg.rotation.z, 0, 10, delta);
-      this.rightLeg.rotation.z = THREE.MathUtils.damp(this.rightLeg.rotation.z, 0, 10, delta);
-
-      const breath = Math.sin(this.walkTime) * 0.02;
-      this.bodyMesh.position.y = 0.95 + breath;
-      this.backpackMesh.position.y = 0.95 + breath;
-      this.visorMesh.position.y = 1.05 + breath;
-      this.visorFrameMesh.position.y = 1.05 + breath;
-      if (this.highlightMesh) this.highlightMesh.position.y = 1.16 + breath;
-      if (this.highlightSecondaryMesh) this.highlightSecondaryMesh.position.y = 1.13 + breath;
-      this.hatGroup.position.y = 1.55 + breath;
-    }
+    this.walkBlend = THREE.MathUtils.damp(this.walkBlend, isMoving ? 1 : 0, 12, delta);
+    this.walkTime += delta * 11;
+    const stride = Math.sin(this.walkTime);
+    this.leftLeg.rotation.z = stride * 0.45 * this.walkBlend;
+    this.rightLeg.rotation.z = -stride * 0.45 * this.walkBlend;
+    this.leftLeg.position.y = 0.4 + Math.max(0, stride) * 0.1 * this.walkBlend;
+    this.rightLeg.position.y = 0.4 + Math.max(0, -stride) * 0.1 * this.walkBlend;
+    const bob = Math.abs(stride) * 0.065 * this.walkBlend
+      + Math.sin(this.walkTime * 0.18) * 0.02 * (1 - this.walkBlend);
+    this.bodyMesh.position.y = 0.95 + bob;
+    this.backpackMesh.position.y = 0.95 + bob;
+    this.visorMesh.position.y = 1.05 + bob;
+    this.visorFrameMesh.position.y = 1.05 + bob;
+    if (this.highlightMesh) this.highlightMesh.position.y = 1.16 + bob;
+    if (this.highlightSecondaryMesh) this.highlightSecondaryMesh.position.y = 1.13 + bob;
+    this.hatGroup.position.y = 1.55 + bob;
     this.hatGroup.rotation.z = THREE.MathUtils.damp(this.hatGroup.rotation.z, isMoving ? -0.07 : 0, 5, delta);
 
     // Billboard name tag to face camera

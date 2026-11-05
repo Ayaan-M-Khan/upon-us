@@ -147,14 +147,26 @@ export const GameView: React.FC<GameViewProps> = ({ settings, onLeave }) => {
   }, []);
 
   useEffect(() => {
-    if (isViewingCameras && snapshot && snapshot.state !== GAME_STATES.PLAYING) {
+    if (isViewingCameras && snapshot && (snapshot.state !== GAME_STATES.PLAYING || snapshot.sabotage?.commsDisabled)) {
       sceneRef.current?.toggleSecurityCameras(false);
       setIsViewingCameras(false);
     }
-    if (activeSabotageGame && snapshot && snapshot.state !== GAME_STATES.PLAYING) {
+    if (activeSabotageGame && snapshot && (snapshot.state !== GAME_STATES.PLAYING
+      || !snapshot.players[socketId]?.isAlive
+      || snapshot.sabotage?.type !== activeSabotageGame.type)) {
       setActiveSabotageGame(null);
     }
-  }, [snapshot, isViewingCameras, activeSabotageGame]);
+  }, [snapshot, isViewingCameras, activeSabotageGame, socketId]);
+
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!activeSabotageGame || !scene) return;
+    scene.clearInput();
+    scene.movementLocked = true;
+    return () => {
+      scene.movementLocked = scene.isViewingCameras || !!workRef.current;
+    };
+  }, [activeSabotageGame]);
 
   const handleRepairSabotage = useCallback(() => {
     if (ctx.sabotagePartId && ctx.sabotageType) {
@@ -258,7 +270,10 @@ export const GameView: React.FC<GameViewProps> = ({ settings, onLeave }) => {
         if (e.code === 'Digit4') { e.preventDefault(); handleSelectCameraFeed(3); return; }
       }
 
-      // In-vent fast traversal shortcuts
+      if (activeSabotageGame) {
+        if (e.code === 'Escape') setActiveSabotageGame(null);
+        return;
+      }
 
       // In-vent fast traversal shortcuts
       if (you?.ventId && you.ventLinks && you.ventLinks.length > 0) {
@@ -314,7 +329,7 @@ export const GameView: React.FC<GameViewProps> = ({ settings, onLeave }) => {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [doUse, doReport, doKill, doVent, handleRepairSabotage, handleToggleHitboxes, handleVentMove, stopWork, you, ctx.sabotagePartId, ctx.sabotageType]);
+  }, [doUse, doReport, doKill, doVent, handleRepairSabotage, handleToggleHitboxes, handleVentMove, stopWork, you, ctx.sabotagePartId, ctx.sabotageType, activeSabotageGame]);
 
   const handleLeaveMatch = () => {
     net.leaveLobby();
@@ -378,10 +393,6 @@ export const GameView: React.FC<GameViewProps> = ({ settings, onLeave }) => {
           {activeSabotageGame.type === 'reactor' && (
             <ReactorFixGame
               partId={activeSabotageGame.partId}
-              onResolve={() => {
-                net.fixSabotage(activeSabotageGame.partId);
-                setActiveSabotageGame(null);
-              }}
               onClose={() => setActiveSabotageGame(null)}
             />
           )}

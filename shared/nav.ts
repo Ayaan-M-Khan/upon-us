@@ -1,49 +1,59 @@
 /**
- * Impostor Protocol - Navigation (A* over the eroded floor grid)
+ * Impostor Protocol - Navigation (A* over collision-checked floor cells)
  * Used by server-side bots. Returns world-space waypoints, string-pulled so bots
  * walk in straight lines where the floor allows it.
  */
 
-import { GRID, cellToWorld, navWalkable, worldToCell } from './mapData';
+import { GRID, WallSegment, cellToWorld, isFloorAt, worldToCell } from './mapData';
+import { PLAYER_RADIUS, lineIntersectsWalls, resolveWallCollisions } from './physics';
 
 type Pt = { x: number; z: number };
 
-function nearestWalkable(x: number, z: number): { i: number; j: number } | null {
-  const c = worldToCell(x, z);
-  if (navWalkable(c.i, c.j)) return c;
-  let nearest: { i: number; j: number } | null = null;
-  let nearestDistanceSq = Infinity;
-  for (let dj = -8; dj <= 8; dj++) {
-    for (let di = -8; di <= 8; di++) {
-      const distanceSq = di * di + dj * dj;
-      if (distanceSq >= nearestDistanceSq || !navWalkable(c.i + di, c.j + dj)) continue;
-      nearest = { i: c.i + di, j: c.j + dj };
-      nearestDistanceSq = distanceSq;
-    }
-  }
-  return nearest;
+const clearance = PLAYER_RADIUS + 0.14;
+const cellIndex = (i: number, j: number) => j * GRID.cols + i;
+const walkable = new Uint8Array(GRID.cols * GRID.rows);
+const edges = new Map<number, boolean>();
+
+function isClear(x: number, z: number, radius = clearance): boolean {
+  return isFloorAt(x, z) && !resolveWallCollisions(x, z, radius).collided;
 }
 
-/** True if a straight line between two points stays on safe (eroded) floor. */
-export function hasClearLine(a: Pt, b: Pt): boolean {
-  const dist = Math.hypot(b.x - a.x, b.z - a.z);
-  const steps = Math.max(1, Math.ceil(dist / 0.4));
-  for (let s = 0; s <= steps; s++) {
+for (let j = 0; j < GRID.rows; j++) {
+  for (let i = 0; i < GRID.cols; i++) {
+    const p = cellToWorld(i, j);
+    if (isClear(p.x, p.z)) walkable[cellIndex(i, j)] = 1;
+  }
+}
+
+function canTraverse(a: Pt, b: Pt, radius = clearance): boolean {
+  const steps = Math.max(1, Math.ceil(Math.hypot(b.x - a.x, b.z - a.z) / 0.2));
+  for (let s = 1; s <= steps; s++) {
     const t = s / steps;
-    const c = worldToCell(a.x + (b.x - a.x) * t, a.z + (b.z - a.z) * t);
-    if (!navWalkable(c.i, c.j)) return false;
+    if (!isClear(a.x + (b.x - a.x) * t, a.z + (b.z - a.z) * t, radius)) return false;
   }
   return true;
 }
 
-export function findPath(from: Pt, to: Pt): Pt[] {
-  const start = nearestWalkable(from.x, from.z);
-  const goal = nearestWalkable(to.x, to.z);
-  if (!start || !goal) return [];
+export function findPath(from: Pt, to: Pt, range = 1.2, doors: WallSegment[] = []): Pt[] {
+  const openDoorLine = (a: Pt, b: Pt) => !lineIntersectsWalls(a.x, a.z, b.x, b.z, doors).hit;
+  const start = worldToCell(from.x, from.z);
+  let startIdx = -1;
+  let startDist = Infinity;
+  for (let j = Math.max(0, start.j - 2); j <= Math.min(GRID.rows - 1, start.j + 2); j++) {
+    for (let i = Math.max(0, start.i - 2); i <= Math.min(GRID.cols - 1, start.i + 2); i++) {
+      const index = cellIndex(i, j);
+      if (!walkable[index]) continue;
+      const p = cellToWorld(i, j);
+      const dist = Math.hypot(p.x - from.x, p.z - from.z);
+      if (dist >= startDist || !openDoorLine(from, p) || !canTraverse(from, p, PLAYER_RADIUS)) continue;
+      startIdx = index;
+      startDist = dist;
+    }
+  }
+  if (startIdx < 0) return [];
 
-  const idx = (i: number, j: number) => j * GRID.cols + i;
-  const startIdx = idx(start.i, start.j);
-  const goalIdx = idx(goal.i, goal.j);
+  const atGoal = (point: Pt) => Math.hypot(point.x - to.x, point.z - to.z) <= range
+    && !lineIntersectsWalls(point.x, point.z, to.x, to.z).hit && openDoorLine(point, to);
 
   const gScore = new Map<number, number>([[startIdx, 0]]);
   const cameFrom = new Map<number, number>();
@@ -80,40 +90,48 @@ export function findPath(from: Pt, to: Pt): Pt[] {
     return top;
   };
 
-  const h = (i: number, j: number) => Math.hypot(i - goal.i, j - goal.j);
+  const h = (p: Pt) => Math.max(0, Math.hypot(p.x - to.x, p.z - to.z) - range);
   const dirs = [
     [1, 0, 1], [-1, 0, 1], [0, 1, 1], [0, -1, 1],
     [1, 1, 1.414], [1, -1, 1.414], [-1, 1, 1.414], [-1, -1, 1.414],
   ];
 
-  let found = false;
+  let goalIdx = -1;
   while (heap.length) {
     const [, cur] = pop();
     if (closed.has(cur)) continue;
-    if (cur === goalIdx) {
-      found = true;
+    const ci = cur % GRID.cols;
+    const cj = Math.floor(cur / GRID.cols);
+    const current = cellToWorld(ci, cj);
+    if (atGoal(current)) {
+      goalIdx = cur;
       break;
     }
     closed.add(cur);
-    const ci = cur % GRID.cols;
-    const cj = Math.floor(cur / GRID.cols);
     const cg = gScore.get(cur)!;
     for (const [di, dj, cost] of dirs) {
       const ni = ci + di;
       const nj = cj + dj;
-      if (!navWalkable(ni, nj)) continue;
-      // no cutting corners diagonally
-      if (di !== 0 && dj !== 0 && (!navWalkable(ci + di, cj) || !navWalkable(ci, cj + dj))) continue;
-      const nIdx = idx(ni, nj);
+      if (ni < 0 || nj < 0 || ni >= GRID.cols || nj >= GRID.rows) continue;
+      const nIdx = cellIndex(ni, nj);
+      if (!walkable[nIdx] || closed.has(nIdx)) continue;
+      const next = cellToWorld(ni, nj);
+      const edge = Math.min(cur, nIdx) * walkable.length + Math.max(cur, nIdx);
+      let passable = edges.get(edge);
+      if (passable === undefined) {
+        passable = canTraverse(current, next);
+        edges.set(edge, passable);
+      }
+      if (!passable || !openDoorLine(current, next)) continue;
       const tentative = cg + cost;
       if (tentative < (gScore.get(nIdx) ?? Infinity)) {
         gScore.set(nIdx, tentative);
         cameFrom.set(nIdx, cur);
-        push([tentative + h(ni, nj), nIdx]);
+        push([tentative + h(next), nIdx]);
       }
     }
   }
-  if (!found) return [];
+  if (goalIdx < 0) return [];
 
   const cells: Pt[] = [];
   let c = goalIdx;
@@ -121,6 +139,7 @@ export function findPath(from: Pt, to: Pt): Pt[] {
     cells.push(cellToWorld(c % GRID.cols, Math.floor(c / GRID.cols)));
     c = cameFrom.get(c)!;
   }
+  cells.push(cellToWorld(startIdx % GRID.cols, Math.floor(startIdx / GRID.cols)));
   cells.reverse();
 
   // String pulling
@@ -130,7 +149,7 @@ export function findPath(from: Pt, to: Pt): Pt[] {
   while (k < cells.length) {
     let far = k;
     for (let m = cells.length - 1; m > k; m--) {
-      if (hasClearLine(anchor, cells[m])) {
+      if (openDoorLine(anchor, cells[m]) && canTraverse(anchor, cells[m])) {
         far = m;
         break;
       }
@@ -139,7 +158,5 @@ export function findPath(from: Pt, to: Pt): Pt[] {
     anchor = cells[far];
     k = far + 1;
   }
-  const safeGoal = cellToWorld(goal.i, goal.j);
-  result.push(hasClearLine(anchor, to) ? to : safeGoal);
   return result;
 }

@@ -89,12 +89,12 @@ class NetworkManager {
     return this.currentLobby;
   }
 
-  public createLobby(playerName: string, isPrivate: boolean = false): void {
-    this.socket?.emit(EVENTS.CREATE_LOBBY, { playerName, isPrivate });
+  public createLobby(playerName: string, isPrivate: boolean = false, hatId?: string): void {
+    this.socket?.emit(EVENTS.CREATE_LOBBY, { playerName, isPrivate, hatId });
   }
 
-  public joinLobby(code: string, playerName: string): void {
-    this.socket?.emit(EVENTS.JOIN_LOBBY, { code, playerName });
+  public joinLobby(code: string, playerName: string, hatId?: string): void {
+    this.socket?.emit(EVENTS.JOIN_LOBBY, { code, playerName, hatId });
   }
 
   public leaveLobby(): void {
@@ -176,27 +176,8 @@ class NetworkManager {
     this.socket?.emit(EVENTS.FIX_SABOTAGE, { partId, instant });
   }
 
-  // ---- Role abilities ----
-  public poison(targetId: string): void {
-    this.socket?.emit(EVENTS.POISON_ATTEMPT, { targetId });
-  }
-  public shapeshift(targetId: string): void {
-    this.socket?.emit(EVENTS.SHAPESHIFT, { targetId });
-  }
-  public unshift(): void {
-    this.socket?.emit(EVENTS.UNSHIFT);
-  }
-  public dissolveBody(bodyId: string): void {
-    this.socket?.emit(EVENTS.DISSOLVE_BODY, { bodyId });
-  }
-  public investigate(targetId: string): void {
-    this.socket?.emit(EVENTS.INVESTIGATE_PLAYER, { targetId });
-  }
-  public doctorProtect(targetId: string): void {
-    this.socket?.emit(EVENTS.DOCTOR_PROTECT, { targetId });
-  }
-  public ghostProtect(targetId: string): void {
-    this.socket?.emit(EVENTS.GHOST_PROTECT, { targetId });
+  public holdReactorScanner(partId: number, holding: boolean): void {
+    this.socket?.emit(EVENTS.FIX_SABOTAGE, { partId, holding });
   }
 
   public onChat(cb: (m: ChatMessage) => void): () => void {
@@ -244,26 +225,6 @@ class NetworkManager {
     return () => this.playerKilledListeners.delete(cb);
   }
 
-  public onRoleEffectTriggered(cb: (payload: any) => void): () => void {
-    this.socket?.on(EVENTS.ROLE_EFFECT_TRIGGERED, cb);
-    return () => {
-      this.socket?.off(EVENTS.ROLE_EFFECT_TRIGGERED, cb);
-    };
-  }
-
-  public onInvestigationResult(cb: (result: any) => void): () => void {
-    this.socket?.on(EVENTS.INVESTIGATION_RESULT, cb);
-    return () => {
-      this.socket?.off(EVENTS.INVESTIGATION_RESULT, cb);
-    };
-  }
-
-  public onBodyDissolved(cb: (data: { bodyId: string }) => void): () => void {
-    this.socket?.on(EVENTS.BODY_DISSOLVED, cb);
-    return () => {
-      this.socket?.off(EVENTS.BODY_DISSOLVED, cb);
-    };
-  }
 }
 
 export const net = new NetworkManager();

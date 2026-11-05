@@ -10,6 +10,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, Check, Flame, Radio, Shield, Wrench, X, Zap } from 'lucide-react';
 import { soundEngine } from '../audio';
+import { net } from '../net';
 
 interface SabotageGameProps {
   partId: number;
@@ -106,32 +107,22 @@ export const LightsFixGame: React.FC<SabotageGameProps> = ({ onResolve, onClose 
 // -----------------------------------------------------------------------------
 // 2. Reactor Meltdown: Biometric Hand Scanner Hold
 // -----------------------------------------------------------------------------
-export const ReactorFixGame: React.FC<SabotageGameProps> = ({ partId, onResolve, onClose }) => {
+export const ReactorFixGame: React.FC<Omit<SabotageGameProps, 'onResolve'>> = ({ partId, onClose }) => {
   const [holding, setHolding] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const timerRef = useRef<number | null>(null);
 
   useEffect(() => {
-    if (holding) {
-      timerRef.current = window.setInterval(() => {
-        setProgress((p) => {
-          if (p >= 100) {
-            clearInterval(timerRef.current!);
-            soundEngine.playSabotageFixed();
-            onResolve();
-            return 100;
-          }
-          return p + 6;
-        });
-      }, 50);
-    } else {
-      if (timerRef.current) clearInterval(timerRef.current);
-      setProgress(0);
-    }
+    if (!holding) return;
+    const pulse = () => net.holdReactorScanner(partId, true);
+    const release = () => setHolding(false);
+    pulse();
+    const interval = window.setInterval(pulse, 200);
+    window.addEventListener('blur', release);
     return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
+      window.clearInterval(interval);
+      window.removeEventListener('blur', release);
+      net.holdReactorScanner(partId, false);
     };
-  }, [holding, onResolve]);
+  }, [holding, partId]);
 
   return (
     <div className="relative w-full max-w-md bg-slate-900 border-4 border-red-600/90 rounded-3xl p-6 shadow-2xl flex flex-col items-center select-none">
@@ -153,23 +144,6 @@ export const ReactorFixGame: React.FC<SabotageGameProps> = ({ partId, onResolve,
 
       {/* Biometric Hand Scanner Stage */}
       <div className="relative w-48 h-48 rounded-full border-4 border-red-500/70 bg-slate-950 flex flex-col items-center justify-center p-4 my-2 shadow-[inset_0_0_30px_rgba(239,68,68,0.3)]">
-        {/* Progress SVG Ring */}
-        <svg className="absolute inset-0 w-full h-full -rotate-90">
-          <circle cx="96" cy="96" r="88" fill="none" stroke="#1e293b" strokeWidth="8" />
-          <circle
-            cx="96"
-            cy="96"
-            r="88"
-            fill="none"
-            stroke="#ef4444"
-            strokeWidth="8"
-            strokeDasharray={2 * Math.PI * 88}
-            strokeDashoffset={2 * Math.PI * 88 * (1 - progress / 100)}
-            strokeLinecap="round"
-            className="transition-all duration-75"
-          />
-        </svg>
-
         {/* Hand Print Icon */}
         <button
           onPointerDown={() => {
@@ -178,6 +152,12 @@ export const ReactorFixGame: React.FC<SabotageGameProps> = ({ partId, onResolve,
           }}
           onPointerUp={() => setHolding(false)}
           onPointerLeave={() => setHolding(false)}
+          onPointerCancel={() => setHolding(false)}
+          onKeyDown={(event) => {
+            if (event.key === ' ' || event.key === 'Enter') setHolding(true);
+          }}
+          onKeyUp={() => setHolding(false)}
+          onBlur={() => setHolding(false)}
           className={`relative z-10 w-32 h-32 rounded-full border-2 transition-all flex flex-col items-center justify-center cursor-pointer active:scale-95 ${
             holding
               ? 'bg-red-600/80 border-red-300 shadow-[0_0_30px_rgba(239,68,68,0.8)]'
@@ -186,7 +166,7 @@ export const ReactorFixGame: React.FC<SabotageGameProps> = ({ partId, onResolve,
         >
           <span className="text-4xl">🖐️</span>
           <span className="text-[10px] font-black text-white mt-1 tracking-wider uppercase">
-            {holding ? `${Math.round(progress)}%` : 'HOLD SCANNER'}
+            {holding ? 'WAITING FOR PARTNER' : 'HOLD SCANNER'}
           </span>
         </button>
       </div>

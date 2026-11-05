@@ -45,11 +45,12 @@ import {
   EMERGENCY_BUTTON_RANGE,
   MAP_VENTS,
   detectRoom,
+  getClosedDoorWalls,
   getRoomSpot,
   getSpawnPosition,
 } from '../../shared/mapData';
 import { findPath } from '../../shared/nav';
-import { lineIntersectsWalls, resolveMovementCollisions, resolveWallCollisions } from '../../shared/physics';
+import { lineIntersectsWalls, resolveMovementCollisions } from '../../shared/physics';
 import { assignRoles } from './roles';
 import { SabotageManager } from './sabotage';
 import { GameStateMachine } from './stateMachine';
@@ -64,9 +65,11 @@ interface TaskState {
 }
 
 interface BotBrain {
-  mode: 'idle' | 'task' | 'work' | 'wander' | 'body' | 'chase' | 'flee' | 'repair';
+  mode: 'idle' | 'task' | 'work' | 'repair' | 'wander' | 'body' | 'chase' | 'flee';
   path: Pt[];
   goal: Pt | null;
+  goalRange: number;
+  nextRouteAt: number;
   thinkAt: number;
   waitUntil: number;
   workEnd: number;
@@ -74,8 +77,6 @@ interface BotBrain {
   targetId: string | null;
   fleeUntil: number;
   suspectId: string | null;
-  bodyTargetId: string | null;
-  bodyWillReport: boolean;
   voteAt: number;
   chatAt: number;
   chatLine: string | null;
@@ -88,6 +89,7 @@ interface GamePlayer extends PlayerSnapshot {
   role: Role;
   tasks: TaskState[];
   killReadyAt: number;
+  ventEnteredAt?: number;
   emergenciesLeft: number;
   ventId: string | null;
   lastInputAt: number;
@@ -127,8 +129,10 @@ export class GameRoom {
   private bodies: Map<string, Body> = new Map();
   private meeting: Meeting | null = null;
   private sabotageManager = new SabotageManager();
+  private reactorHolds = new Map<string, { partId: number; expiresAt: number }>();
   private phaseEndsAt = 0;
   private emergencyReadyAt = 0;
+  private readonly hasImpostorSeat: boolean;
   private winner: 'crewmates' | 'impostors' | null = null;
   private ended = false;
   private chatCounter = 0;
@@ -211,6 +215,7 @@ export class GameRoom {
       this.players.set(seat.id, gp);
     });
 
+    this.hasImpostorSeat = [...this.players.values()].some((p) => p.role === 'impostor');
     this.emergencyReadyAt = startNow + ROLE_REVEAL_MS + settings.emergencyCooldown * 1000;
     this.stateMachine.transitionTo(GAME_STATES.ROLE_REVEAL);
     this.phaseEndsAt = startNow + ROLE_REVEAL_MS;
@@ -245,7 +250,8 @@ export class GameRoom {
     let nx = p.x + dx;
     let nz = p.z + dz;
     if (p.isAlive) {
-      const r = resolveWallCollisions(nx, nz);
+      if (lineIntersectsWalls(p.x, p.z, nx, nz, this.closedDoorWalls()).hit) return;
+      const r = resolveMovementCollisions(p.x, p.z, nx, nz);
       nx = r.x;
       nz = r.z;
     }
@@ -261,7 +267,12 @@ export class GameRoom {
     const p = this.players.get(socketId);
     if (!p) return;
     this.players.delete(socketId);
-    if (this.meeting) this.meeting.votes.delete(socketId);
+    this.reactorHolds.delete(socketId);
+    if (this.meeting) {
+      for (const [voterId, targetId] of this.meeting.votes) {
+        if (voterId === socketId || targetId === socketId) this.meeting.votes.delete(voterId);
+      }
+    }
     const state = this.stateMachine.currentState;
     if (state === GAME_STATES.PLAYING || state === GAME_STATES.MEETING) this.checkWin();
     if (this.humans().length === 0) this.destroy();
@@ -269,7 +280,7 @@ export class GameRoom {
 
   public startTask(id: string, taskId: string): void {
     const p = this.players.get(id);
-    if (!p || this.stateMachine.currentState !== GAME_STATES.PLAYING || p.ventId) return;
+    if (!p || p.role === 'impostor' || this.stateMachine.currentState !== GAME_STATES.PLAYING || p.ventId) return;
     const st = this.currentStep(p, taskId);
     if (!st) return;
     if (Math.hypot(p.x - st.x, p.z - st.z) > TASK_RANGE) return;
@@ -301,7 +312,7 @@ export class GameRoom {
     if (!target.isAlive || target.role === 'impostor' || target.ventId) return;
     if (Date.now() < killer.killReadyAt) return;
     const range = KILL_DISTANCE_M[this.settings.killDistance] + 0.6;
-    if (Math.hypot(killer.x - target.x, killer.z - target.z) > range) return;
+    if (!this.canSee(killer, target, range)) return;
     this.performKill(killer, target);
   }
 
@@ -309,13 +320,14 @@ export class GameRoom {
     const p = this.players.get(reporterId);
     const body = this.bodies.get(bodyId);
     if (!p || !body || !p.isAlive || this.stateMachine.currentState !== GAME_STATES.PLAYING || p.ventId) return;
-    if (Math.hypot(p.x - body.x, p.z - body.z) > REPORT_RANGE + 0.5) return;
+    if (!this.canSee(p, body, REPORT_RANGE + 0.5)) return;
     this.startMeeting(p, 'body', body);
   }
 
   public callEmergency(callerId: string): void {
     const p = this.players.get(callerId);
     if (!p || !p.isAlive || this.stateMachine.currentState !== GAME_STATES.PLAYING || p.ventId) return;
+    if (this.sabotageManager.getActiveSabotage()) return;
     if (p.emergenciesLeft <= 0 || Date.now() < this.emergencyReadyAt) return;
     if (Math.hypot(p.x - EMERGENCY_BUTTON_POS.x, p.z - EMERGENCY_BUTTON_POS.z) > EMERGENCY_BUTTON_RANGE + 0.8) return;
     p.emergenciesLeft--;
@@ -329,6 +341,7 @@ export class GameRoom {
     if (this.stateMachine.currentState !== GAME_STATES.PLAYING) return;
     if (p.role === 'engineer' && Date.now() < p.engineerVentReadyAt) return;
     if (Math.hypot(p.x - vent.x, p.z - vent.z) > VENT_RANGE + 0.6) return;
+    p.ventEnteredAt = Date.now();
     p.ventId = ventId;
     p.inVent = true;
     if (p.role === 'engineer') p.engineerVentEndsAt = Date.now() + 6000;
@@ -355,13 +368,16 @@ export class GameRoom {
   public ventExit(id: string): void {
     const p = this.players.get(id);
     if (!p || !p.ventId) return;
+    const now = Date.now();
+    p.killReadyAt = now + Math.max(0, p.killReadyAt - (p.ventEnteredAt ?? now));
+    p.ventEnteredAt = undefined;
     p.ventId = null;
     p.inVent = false;
     if (p.role === 'engineer') {
-      p.engineerVentReadyAt = Date.now() + 20000;
+      p.engineerVentReadyAt = now + 20000;
       p.engineerVentEndsAt = 0;
     }
-    p.lastInputAt = Date.now();
+    p.lastInputAt = now;
     p.posSeq = (p.posSeq || 0) + 1;
   }
 
@@ -371,7 +387,7 @@ export class GameRoom {
     if (!m || m.phase !== 'VOTING' || !voter || !voter.isAlive || m.votes.has(voterId)) return;
     if (targetId !== 'skip') {
       const t = this.players.get(targetId);
-      if (!t || !t.isAlive || targetId === voterId) return;
+      if (!t || !t.isAlive) return;
     }
     m.votes.set(voterId, targetId);
   }
@@ -390,11 +406,12 @@ export class GameRoom {
 
   public triggerSabotage(playerId: string, type: SabotageType, room?: string): boolean {
     const p = this.players.get(playerId);
-    if (!p || p.role !== 'impostor' || !p.isAlive || p.ventId || this.stateMachine.currentState !== GAME_STATES.PLAYING) {
+    if (!p || p.role !== 'impostor' || this.stateMachine.currentState !== GAME_STATES.PLAYING) {
       return false;
     }
     const success = this.sabotageManager.triggerSabotage(type, room);
     if (success) {
+      if (type === 'reactor') this.reactorHolds.clear();
       this.io.to(this.code).emit(EVENTS.SABOTAGE_STARTED, { type, room });
     }
     return success;
@@ -402,7 +419,7 @@ export class GameRoom {
 
   public fixSabotage(playerId: string, partId?: number): boolean {
     const p = this.players.get(playerId);
-    if (!p || !p.isAlive || p.role === 'impostor' || p.ventId || this.stateMachine.currentState !== GAME_STATES.PLAYING) {
+    if (!p || !p.isAlive || p.ventId || this.stateMachine.currentState !== GAME_STATES.PLAYING) {
       return false;
     }
     const id = partId ?? 1;
@@ -415,6 +432,34 @@ export class GameRoom {
       }
     }
     return success;
+  }
+
+  public holdReactorScanner(playerId: string, partId: number, holding: boolean): void {
+    const sabotage = this.sabotageManager.getActiveSabotage();
+    if (sabotage?.type !== 'reactor' || this.stateMachine.currentState !== GAME_STATES.PLAYING) return;
+    const now = Date.now();
+    if (!holding) {
+      this.reactorHolds.delete(playerId);
+      return;
+    }
+    if (now >= sabotage.endsAt) return;
+    this.reactorHolds.set(playerId, { partId, expiresAt: now + 750 });
+
+    const occupied = new Set<number>();
+    for (const [id, hold] of this.reactorHolds) {
+      const player = this.players.get(id);
+      const part = sabotage.parts.find((station) => station.id === hold.partId);
+      if (hold.expiresAt <= now || !player?.isAlive || player.ventId || !part || !this.canSee(player, part, 3.8)) {
+        this.reactorHolds.delete(id);
+        continue;
+      }
+      occupied.add(part.id);
+    }
+    if (occupied.size === sabotage.parts.length) {
+      this.sabotageManager.resolve(now);
+      this.reactorHolds.clear();
+      this.io.to(this.code).emit(EVENTS.SABOTAGE_RESOLVED);
+    }
   }
 
   public destroy(): void {
@@ -549,10 +594,10 @@ export class GameRoom {
   private advanceTask(p: GamePlayer, taskId: string): void {
     const t = p.tasks.find((x) => x.def.id === taskId);
     if (!t || t.done) return;
-    // Impostors only fake tasks: it looks the same to them but never counts toward progress.
+    if (p.role === 'impostor') return;
     t.step++;
     if (t.step >= t.def.steps.length) t.done = true;
-    if (p.role !== 'impostor') this.checkWin();
+    this.checkWin();
   }
 
   private taskProgress(): number {
@@ -561,8 +606,8 @@ export class GameRoom {
     for (const p of this.players.values()) {
       if (p.role === 'impostor') continue;
       for (const t of p.tasks) {
-        total += t.def.steps.length;
-        done += t.done ? t.def.steps.length : t.step;
+        total++;
+        if (t.done) done++;
       }
     }
     return total === 0 ? 1 : done / total;
@@ -634,6 +679,7 @@ export class GameRoom {
     if (this.meeting || this.stateMachine.currentState !== GAME_STATES.PLAYING) return;
     const now = Date.now();
     this.sabotageManager.clearOnMeeting(now);
+    this.reactorHolds.clear();
     const victimPlayer = body ? this.players.get(body.id) : undefined;
     this.meeting = {
       phase: 'INTRO',
@@ -657,6 +703,7 @@ export class GameRoom {
       if (p.role === 'engineer' && p.ventId) p.engineerVentReadyAt = now + 20000;
       p.engineerVentEndsAt = 0;
       p.ventId = null;
+      p.ventEnteredAt = undefined;
       p.inVent = false;
       p.isMoving = false;
       const pos = getSpawnPosition(i++, this.players.size);
@@ -729,7 +776,8 @@ export class GameRoom {
     const voteList: { voterId: string; targetId: string }[] = [];
     for (const p of this.players.values()) {
       if (!p.isAlive) continue;
-      const choice = m.votes.get(p.id) ?? 'skip'; // not voting counts as a skip
+      const choice = m.votes.get(p.id);
+      if (!choice) continue;
       tally[choice] = (tally[choice] || 0) + 1;
       voteList.push({ voterId: p.id, targetId: choice });
     }
@@ -741,7 +789,7 @@ export class GameRoom {
     const results: MeetingResults = {
       votes: this.settings.anonymousVotes ? [] : voteList,
       tally,
-      outcome: 'tie',
+      outcome: leaders.length === 0 ? 'skip' : 'tie',
     };
     if (leaders.length === 1) {
       if (leaders[0] === 'skip') {
@@ -787,7 +835,7 @@ export class GameRoom {
       p.room = detectRoom(p.x, p.z);
       p.posSeq = (p.posSeq || 0) + 1;
       p.lastInputAt = now;
-      if (p.role === 'impostor') p.killReadyAt = now + Math.min(this.settings.killCooldown, 15) * 1000;
+      if (p.role === 'impostor') p.killReadyAt = now + this.settings.killCooldown * 1000;
       if (p.brain) {
         p.brain.path = [];
         p.brain.mode = 'idle';
@@ -839,10 +887,9 @@ export class GameRoom {
     const alive = all.filter((p) => p.isAlive);
     const impostors = alive.filter((p) => p.role === 'impostor').length;
     const crew = alive.length - impostors;
-    const hasImpostorSeat = all.some((p) => p.role === 'impostor');
     const hasCrewSeat = all.some((p) => p.role !== 'impostor');
 
-    if (hasImpostorSeat && impostors === 0) {
+    if (this.hasImpostorSeat && impostors === 0) {
       this.endGame('crewmates', 'All impostors were removed');
       return true;
     }
@@ -892,7 +939,7 @@ export class GameRoom {
               .map((o) => ({ id: o.id, name: o.name, colorId: o.colorId }))
           : [],
       tasks: p.tasks.map((t) => this.taskView(t)),
-      killCooldownMs: Math.max(0, p.killReadyAt - now),
+      killCooldownMs: Math.max(0, p.killReadyAt - (p.ventEnteredAt ?? now)),
       emergencyLeft: p.emergenciesLeft,
       emergencyCooldownMs: Math.max(0, this.emergencyReadyAt - now),
       engineerVentCooldownMs: Math.max(0, p.engineerVentReadyAt - now),
@@ -918,6 +965,8 @@ export class GameRoom {
       mode: 'idle',
       path: [],
       goal: null,
+      goalRange: 1.2,
+      nextRouteAt: 0,
       thinkAt: 0,
       waitUntil: Date.now() + ROLE_REVEAL_MS + Math.random() * 3000,
       workEnd: 0,
@@ -925,8 +974,6 @@ export class GameRoom {
       targetId: null,
       fleeUntil: 0,
       suspectId: null,
-      bodyTargetId: null,
-      bodyWillReport: false,
       voteAt: 0,
       chatAt: 0,
       chatLine: null,
@@ -940,10 +987,15 @@ export class GameRoom {
     return BASE_PLAYER_SPEED * this.settings.playerSpeed * 0.92;
   }
 
-  private setGoal(bot: GamePlayer, goal: Pt): void {
+  private setGoal(bot: GamePlayer, goal: Pt, range = 1.2): void {
     const b = bot.brain!;
+    const now = Date.now();
+    if (!b.path.length && b.goal?.x === goal.x && b.goal?.z === goal.z
+      && b.goalRange === range && now < b.nextRouteAt) return;
     b.goal = goal;
-    b.path = findPath({ x: bot.x, z: bot.z }, goal);
+    b.goalRange = range;
+    b.nextRouteAt = now + 800;
+    b.path = findPath(bot, goal, range, bot.isAlive ? this.closedDoorWalls() : []);
   }
 
   private botMove(bot: GamePlayer, dt: number): void {
@@ -952,30 +1004,33 @@ export class GameRoom {
     if (b.mode === 'work' || b.path.length === 0) return;
 
     let remaining = this.botSpeed() * dt;
+    const doors = bot.isAlive ? this.closedDoorWalls() : [];
     while (remaining > 0 && b.path.length) {
       const wp = b.path[0];
       const dx = wp.x - bot.x;
       const dz = wp.z - bot.z;
       const d = Math.hypot(dx, dz);
-      const reach = b.path.length > 1 ? 0.45 : 0.15;
-      if (d <= reach) {
+      if (d <= 0.06) {
         b.path.shift();
         continue;
       }
-      const step = Math.min(remaining, d);
+      const step = Math.min(remaining, d, 0.18);
       let nx = bot.x + (dx / d) * step;
       let nz = bot.z + (dz / d) * step;
       if (bot.isAlive) {
+        if (lineIntersectsWalls(bot.x, bot.z, nx, nz, doors).hit) break;
         const r = resolveMovementCollisions(bot.x, bot.z, nx, nz);
         nx = r.x;
         nz = r.z;
       }
+      const movedX = nx - bot.x;
+      const movedZ = nz - bot.z;
+      if (Math.hypot(movedX, movedZ) < 0.001) break;
       bot.x = nx;
       bot.z = nz;
-      bot.rotation = Math.atan2(dx, dz);
+      bot.rotation = Math.atan2(movedX, movedZ);
       bot.isMoving = true;
       remaining -= step;
-      if (step < d) break;
     }
     bot.room = detectRoom(bot.x, bot.z);
   }
@@ -993,7 +1048,7 @@ export class GameRoom {
         b.stuckSince = now;
       } else if (now - b.stuckSince > 1200 && b.goal) {
         b.stuckSince = now;
-        this.setGoal(bot, b.goal);
+        this.setGoal(bot, b.goal, b.goalRange);
       }
     } else {
       b.stuckSince = now;
@@ -1001,15 +1056,53 @@ export class GameRoom {
     }
   }
 
+  private closedDoorWalls() {
+    return getClosedDoorWalls(this.sabotageManager.getLockedRooms());
+  }
+
   private canSee(a: Pt, b: Pt, maxDist: number): boolean {
-    return Math.hypot(a.x - b.x, a.z - b.z) <= maxDist && !lineIntersectsWalls(a.x, a.z, b.x, b.z).hit;
+    return Math.hypot(a.x - b.x, a.z - b.z) <= maxDist
+      && !lineIntersectsWalls(a.x, a.z, b.x, b.z).hit
+      && !lineIntersectsWalls(a.x, a.z, b.x, b.z, this.closedDoorWalls()).hit;
   }
 
   private botThink(bot: GamePlayer, now: number): void {
     const b = bot.brain!;
 
-    // Finishing a task is checked every tick so completion is timely.
-    if (b.mode === 'work') {
+    const activeSab = this.sabotageManager.getActiveSabotage();
+    const shouldRepair = activeSab && bot.isAlive && bot.role !== 'impostor';
+    const shouldThink = now >= b.thinkAt;
+
+    if (shouldThink && bot.isAlive && b.mode !== 'flee') {
+      let nearest = b.mode === 'body' && b.targetId ? this.bodies.get(b.targetId) : undefined;
+      let best = nearest ? Math.hypot(bot.x - nearest.x, bot.z - nearest.z) : Infinity;
+      for (const body of this.bodies.values()) {
+        const distance = Math.hypot(bot.x - body.x, bot.z - body.z);
+        if (distance >= best || !this.canSee(bot, body, 11)) continue;
+        if (bot.role === 'impostor' && (body.killerId === bot.id || Math.random() >= 0.2)) continue;
+        best = distance;
+        nearest = body;
+      }
+      if (nearest) {
+        b.thinkAt = now + 300;
+        this.reportBody(bot.id, nearest.id);
+        if (this.meeting) return;
+        if (b.mode !== 'body' || b.targetId !== nearest.id || !b.path.length) {
+          b.currentTask = null;
+          b.mode = 'body';
+          b.targetId = nearest.id;
+          this.setGoal(bot, nearest, REPORT_RANGE - 0.3);
+        }
+        if (b.path.length) return;
+      }
+      if (b.mode === 'body') {
+        b.mode = 'idle';
+        b.targetId = null;
+        b.path = [];
+      }
+    }
+
+    if (b.mode === 'work' && !(shouldRepair && activeSab.isCritical)) {
       if (now >= b.workEnd) {
         if (b.currentTask) this.advanceTask(bot, b.currentTask.def.id);
         b.currentTask = null;
@@ -1019,57 +1112,8 @@ export class GameRoom {
       return;
     }
 
-    if (now < b.thinkAt) return;
+    if (!shouldThink) return;
     b.thinkAt = now + 250 + Math.random() * 150;
-
-    // --- 1. Notice and report bodies (living bots only) ---
-    if (bot.isAlive && b.mode !== 'flee') {
-      let body = b.bodyTargetId ? this.bodies.get(b.bodyTargetId) : undefined;
-      if (!body) {
-        b.bodyTargetId = null;
-        const nearby = [...this.bodies.values()]
-          .map((candidate) => ({
-            candidate,
-            distance: Math.hypot(bot.x - candidate.x, bot.z - candidate.z),
-          }))
-          .filter(({ candidate, distance }) =>
-            distance <= 18 && (candidate.room === bot.room || this.canSee(bot, candidate, 18))
-          )
-          .sort((a, c) => a.distance - c.distance);
-        const found = nearby[0]?.candidate;
-        if (found) {
-          const guilty = found.killerId === bot.id;
-          b.bodyWillReport = bot.role !== 'impostor' || (!guilty && Math.random() < 0.35);
-          if (b.bodyWillReport) {
-            body = found;
-            b.bodyTargetId = found.id;
-          }
-        }
-      }
-
-      if (body && b.bodyWillReport) {
-        const distance = Math.hypot(bot.x - body.x, bot.z - body.z);
-        if (distance <= REPORT_RANGE) {
-          this.startMeeting(bot, 'body', body);
-          return;
-        }
-        b.mode = 'body';
-        if (!b.goal || b.goal.x !== body.x || b.goal.z !== body.z || b.path.length === 0) {
-          this.setGoal(bot, { x: body.x, z: body.z });
-        }
-        return;
-      }
-    } else if (b.bodyTargetId) {
-      b.bodyTargetId = null;
-      b.bodyWillReport = false;
-    }
-
-    if (b.mode === 'body') {
-      b.mode = 'idle';
-      b.bodyTargetId = null;
-      b.bodyWillReport = false;
-      b.path = [];
-    }
 
     // --- 2. Impostor hunting ---
     if (bot.role === 'impostor' && bot.isAlive) {
@@ -1107,24 +1151,43 @@ export class GameRoom {
     }
 
     // --- 2.5 Sabotage response (crewmate bots repair, impostor bots trigger) ---
-    const activeSab = this.sabotageManager.getActiveSabotage();
-    if (activeSab && bot.isAlive && bot.role !== 'impostor') {
-      const part = activeSab.parts.find((p) => !p.resolved);
+    if (shouldRepair) {
+      const distance = (part: Pt) => Math.hypot(bot.x - part.x, bot.z - part.z);
+      const available = activeSab.parts.filter((part) => !part.resolved)
+        .sort((a, b) => distance(a) - distance(b));
+      const part = activeSab.type === 'reactor'
+        ? available.find((station) => ![...this.players.values()].some((other) =>
+            other !== bot && other.isAlive && other.brain?.mode === 'repair'
+            && other.brain.goal?.x === station.x && other.brain.goal.z === station.z)
+            && ![...this.reactorHolds].some(([id, hold]) => id !== bot.id && hold.partId === station.id
+              && hold.expiresAt > now && this.players.get(id)?.isAlive))
+        : available[0];
       if (part) {
-        const dist = Math.hypot(bot.x - part.x, bot.z - part.z);
-        if (dist <= 3.8) {
-          this.fixSabotage(bot.id, part.id);
+        b.currentTask = null;
+        if (activeSab.type === 'reactor' && this.canSee(bot, part, 3.8)) {
+          b.mode = 'repair';
+          b.goal = part;
+          b.path = [];
+          this.holdReactorScanner(bot.id, part.id, true);
+          return;
+        }
+        if (this.canSee(bot, part, 3.8) && this.fixSabotage(bot.id, part.id)) {
+          b.path = [];
           b.mode = 'idle';
           b.waitUntil = now + 1200;
           return;
-        } else if (b.mode !== 'task' || !b.goal || Math.hypot(b.goal.x - part.x, b.goal.z - part.z) > 1.5) {
-          b.mode = 'task';
-          b.currentTask = null;
-          this.setGoal(bot, { x: part.x, z: part.z });
-          return;
+        } else if (b.mode !== 'repair' || b.goal?.x !== part.x || b.goal?.z !== part.z || !b.path.length) {
+          b.mode = 'repair';
+          this.setGoal(bot, part, 3.5);
         }
+        return;
       }
-    } else if (!activeSab && bot.isAlive && bot.role === 'impostor' && this.sabotageManager.getCooldownRemainingSecs(now) === 0) {
+    }
+    if (b.mode === 'repair') {
+      b.mode = 'idle';
+      b.path = [];
+    }
+    if (!activeSab && bot.isAlive && bot.role === 'impostor' && this.sabotageManager.getCooldownRemainingSecs(now) === 0) {
       if (Math.random() < 0.04) {
         const types: SabotageType[] = ['reactor', 'o2', 'lights', 'comms'];
         const chosen = types[Math.floor(Math.random() * types.length)];
@@ -1135,13 +1198,13 @@ export class GameRoom {
     // --- 3. Tasks / wandering ---
     if (b.mode === 'task' && b.currentTask) {
       const step = this.taskView(b.currentTask);
-      if (Math.hypot(bot.x - step.x, bot.z - step.z) < 1.3) {
+      if (this.canSee(bot, step, TASK_RANGE)) {
         b.mode = 'work';
         b.workEnd = now + step.hold * 1000 + Math.random() * 800;
         b.path = [];
         bot.isMoving = false;
       } else if (b.path.length === 0) {
-        this.setGoal(bot, { x: step.x, z: step.z });
+        this.setGoal(bot, step, TASK_RANGE - 0.25);
       }
       return;
     }
@@ -1155,12 +1218,17 @@ export class GameRoom {
     }
 
     if (b.mode === 'idle' && now >= b.waitUntil) {
-      const remaining = bot.tasks.filter((t) => !t.done);
-      if (remaining.length > 0 && Math.random() < 0.9) {
-        b.currentTask = remaining[Math.floor(Math.random() * remaining.length)];
+      const remaining = bot.role !== 'impostor' ? bot.tasks.filter((t) => !t.done) : [];
+      if (remaining.length > 0) {
+        remaining.sort((a, bTask) => {
+          const first = this.taskView(a);
+          const second = this.taskView(bTask);
+          return Math.hypot(bot.x - first.x, bot.z - first.z) - Math.hypot(bot.x - second.x, bot.z - second.z);
+        });
+        b.currentTask = remaining[0];
         b.mode = 'task';
         const step = this.taskView(b.currentTask);
-        this.setGoal(bot, { x: step.x, z: step.z });
+        this.setGoal(bot, step, TASK_RANGE - 0.25);
       } else {
         b.mode = 'wander';
         this.setGoal(bot, this.randomStation());
@@ -1207,9 +1275,8 @@ export class GameRoom {
       if (targets.length && Math.random() < 0.5) return targets[Math.floor(Math.random() * targets.length)].id;
       return 'skip';
     }
-    if (b.suspectId && others.some((p) => p.id === b.suspectId) && Math.random() < 0.9) return b.suspectId;
-    if (Math.random() < 0.55) return 'skip';
-    return others[Math.floor(Math.random() * others.length)].id;
+    if (b.suspectId && others.some((p) => p.id === b.suspectId)) return b.suspectId;
+    return 'skip';
   }
 
   private scheduleBotChat(m: Meeting, now: number): void {

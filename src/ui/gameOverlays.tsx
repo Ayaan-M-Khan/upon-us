@@ -249,7 +249,7 @@ export const MeetingOverlay: React.FC<{ snapshot: GameStateSnapshot }> = ({ snap
               return (
                 <div key={p.id} className="relative">
                   <button
-                    disabled={!(meeting.phase === 'VOTING' && iAmAlive && !hasVoted && p.isAlive && p.id !== myId)}
+                    disabled={!(meeting.phase === 'VOTING' && iAmAlive && !hasVoted && p.isAlive)}
                     onClick={() => setSelected(isSel ? null : p.id)}
                     className={`w-full flex items-center space-x-2 p-2 rounded-xl border-2 text-left transition-all ${
                       isSel ? 'border-yellow-300 bg-slate-700' : 'border-slate-700 bg-slate-800'

@@ -451,7 +451,7 @@ export const LobbyView: React.FC<LobbyProps> = ({ onLeave }) => {
                 </div>
               </div>
 
-              {/* Hat Selector Grid (13 hats) */}
+              {/* Hat selector */}
               <div>
                 <div className="flex justify-between items-center mb-1.5">
                   <span className="text-xs font-black uppercase tracking-wider text-slate-400">
@@ -466,7 +466,8 @@ export const LobbyView: React.FC<LobbyProps> = ({ onLeave }) => {
                       <button
                         key={h.id}
                         onClick={() => handleSelectHat(h.id)}
-                        className={`py-2 px-1.5 rounded-xl text-[11px] font-black transition-all cursor-pointer border text-center truncate ${
+                        aria-pressed={isSelected}
+                        className={`min-h-10 px-1.5 py-2 rounded-xl text-[11px] font-black transition-all cursor-pointer border text-center leading-tight focus-visible:outline-2 focus-visible:outline-cyan-300 ${
                           isSelected
                             ? 'bg-cyan-500/30 border-cyan-400 text-white ring-2 ring-cyan-400/40 shadow-sm'
                             : 'bg-slate-800/80 hover:bg-slate-750 border-slate-700 text-slate-300'

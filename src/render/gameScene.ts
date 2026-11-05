@@ -21,17 +21,18 @@ import {
   MAP_OBSTACLES,
   MAP_ROOMS_DETAIL,
   MAP_VENTS,
-  detectRoom,
   isFloorAt,
   MAP_WALLS,
   Rect,
   SECURITY_CAMERAS,
   SECURITY_DESK_POS,
   SECURITY_DESK_RANGE,
+  detectRoom,
+  getClosedDoorWalls,
   hasLineOfSight,
 } from '../../shared/mapData';
 import { findPath } from '../../shared/nav';
-import { PLAYER_RADIUS, resolveMovementCollisions } from '../../shared/physics';
+import { lineIntersectsWalls, PLAYER_RADIUS, resolveMovementCollisions } from '../../shared/physics';
 import { soundEngine } from '../audio';
 import { net } from '../net';
 import { CameraController } from './cameraController';
@@ -77,7 +78,6 @@ function isTypingTarget(t: EventTarget | null): boolean {
 
 const MOVE_KEYS = new Set([
   'KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
-  'ShiftLeft', 'ShiftRight',
 ]);
 
 export class GameScene {
@@ -161,6 +161,7 @@ export class GameScene {
 
   // Security CCTV Surveillance System
   public isViewingCameras = false;
+  private visibilityWalls = MAP_WALLS;
   public activeCameraIndex = 0;
 
   private onRoomChangeCb?: (room: string) => void;
@@ -196,7 +197,7 @@ export class GameScene {
    * Prevents players from seeing through walls into other rooms.
    */
   public canSeeActor(
-    lx: number, lz: number, lRoom: string,
+    lx: number, lz: number,
     tx: number, tz: number,
     isGhost: boolean, isTargetAlive: boolean,
     camZone?: Rect
@@ -214,50 +215,7 @@ export class GameScene {
     const d = Math.hypot(tx - lx, tz - lz);
     if (d > 24) return false; // Fog of war max visual horizon
 
-    const targetRoom = detectRoom(tx, tz);
-    if (lRoom === targetRoom) {
-      // In same room: check line of sight against internal partition walls
-      return hasLineOfSight(lx, lz, tx, tz);
-    }
-
-    // If target is inside an enclosed room and local player is outside that room:
-    if (targetRoom !== 'Corridor') {
-      const r = MAP_ROOMS_DETAIL.find((m) => m.name === targetRoom);
-      if (r) {
-        let minDist = Infinity;
-        for (const b of r.rects) {
-          const dx = Math.max(0, b.minX - lx, lx - b.maxX);
-          const dz = Math.max(0, b.minZ - lz, lz - b.maxZ);
-          const dist = Math.hypot(dx, dz);
-          if (dist < minDist) minDist = dist;
-        }
-        // Outside 4.8m peeking radius: room occlusion box completely conceals target
-        if (minDist >= 4.8) return false;
-      }
-    }
-
-    // If local player is inside an enclosed room and target is outside in corridor:
-    if (lRoom !== 'Corridor' && targetRoom === 'Corridor') {
-      const r = MAP_ROOMS_DETAIL.find((m) => m.name === lRoom);
-      if (r) {
-        let minDist = Infinity;
-        for (const b of r.rects) {
-          const dx = Math.max(0, b.minX - tx, tx - b.maxX);
-          const dz = Math.max(0, b.minZ - tz, tz - b.maxZ);
-          const dist = Math.hypot(dx, dz);
-          if (dist < minDist) minDist = dist;
-        }
-        if (minDist >= 4.8) return false;
-      }
-    }
-
-    // If both are in different enclosed rooms, they cannot see each other
-    if (lRoom !== 'Corridor' && targetRoom !== 'Corridor' && lRoom !== targetRoom) {
-      return false;
-    }
-
-    // Clear doorway or corridor sightline
-    return hasLineOfSight(lx, lz, tx, tz);
+    return hasLineOfSight(lx, lz, tx, tz, this.visibilityWalls);
   }
 
   constructor(container: HTMLElement, settings: GameSettings, myId: string, onRoomChange?: (room: string) => void) {
@@ -404,7 +362,7 @@ export class GameScene {
       this.waypointPath.geometry.dispose();
       (this.waypointPath.material as THREE.Material).dispose();
     }
-    const route = findPath(this.localPos, { x, z });
+    const route = findPath(this.localPos, { x, z }, 1.2, getClosedDoorWalls(this.latest?.doorLocks ?? []));
     const points = [this.localPos.clone().setY(0.08), ...route.map((p) => new THREE.Vector3(p.x, 0.08, p.z))];
     this.waypointPath = new THREE.Line(
       new THREE.BufferGeometry().setFromPoints(points),
@@ -420,6 +378,9 @@ export class GameScene {
 
   public handleSnapshot(snapshot: GameStateSnapshot): void {
     this.latest = snapshot;
+    const doorLocks = snapshot.doorLocks ?? [];
+    this.map3D.setDoorLocks(doorLocks);
+    this.visibilityWalls = doorLocks.length ? [...MAP_WALLS, ...getClosedDoorWalls(doorLocks)] : MAP_WALLS;
     const activeIds = new Set<string>();
 
     for (const [id, player] of Object.entries(snapshot.players)) {
@@ -842,7 +803,7 @@ export class GameScene {
     if (you.ventId) return ctx; // in a vent: only the vent controls apply
 
     let best = TASK_RANGE;
-    for (const t of you.tasks) {
+    for (const t of you.role !== 'impostor' ? you.tasks : []) {
       if (t.done) continue;
       const d = Math.hypot(px - t.x, pz - t.z);
       if (d <= best) {
@@ -859,18 +820,18 @@ export class GameScene {
       let bd = REPORT_RANGE;
       for (const b of snap.bodies || []) {
         const d = Math.hypot(px - b.x, pz - b.z);
-        if (d <= bd) {
+        if (d <= bd && !lineIntersectsWalls(px, pz, b.x, b.z, this.visibilityWalls).hit) {
           bd = d;
           ctx.reportBodyId = b.id;
         }
       }
 
       const d = Math.hypot(px - EMERGENCY_BUTTON_POS.x, pz - EMERGENCY_BUTTON_POS.z);
-      ctx.emergency = d <= EMERGENCY_BUTTON_RANGE && you.emergencyLeft > 0 && you.emergencyCooldownMs <= 0;
+      ctx.emergency = !snap.sabotage && d <= EMERGENCY_BUTTON_RANGE && you.emergencyLeft > 0 && you.emergencyCooldownMs <= 0;
 
       // Security CCTV console desk proximity
       const distToSecurity = Math.hypot(px - SECURITY_DESK_POS.x, pz - SECURITY_DESK_POS.z);
-      ctx.canUseCameras = distToSecurity <= SECURITY_DESK_RANGE;
+      ctx.canUseCameras = !snap.sabotage?.commsDisabled && distToSecurity <= SECURITY_DESK_RANGE;
 
       // Sabotage repair console proximity
       if (snap.sabotage && me.isAlive) {
@@ -891,7 +852,7 @@ export class GameScene {
         for (const p of Object.values(snap.players)) {
           if (p.id === this.localPlayerId || !p.isAlive || p.inVent || mates.has(p.id)) continue;
           const dist = Math.hypot(px - p.x, pz - p.z);
-          if (dist <= kd) {
+          if (dist <= kd && !lineIntersectsWalls(px, pz, p.x, p.z, this.visibilityWalls).hit) {
             kd = dist;
             ctx.killTargetId = p.id;
           }
@@ -1080,7 +1041,7 @@ export class GameScene {
       const snap = this.latest;
       const meAlive = snap?.players[this.localPlayerId]?.isAlive ?? true;
       const canSee = this.canSeeActor(
-        this.localPos.x, this.localPos.z, this.currentRoom,
+        this.localPos.x, this.localPos.z,
         px, pz,
         !meAlive, true
       );
@@ -1193,8 +1154,6 @@ export class GameScene {
     // 1. Local movement: rebuilt from the keys held *this frame* and eased with a short velocity ramp.
     let moveX = 0;
     let moveZ = 0;
-    const isSprinting = canMove && (this.keys['ShiftLeft'] || this.keys['ShiftRight']);
-    const sprintMultiplier = isSprinting ? 1.35 : 1.0;
 
     if (canMove) {
       if (this.keys['KeyW'] || this.keys['ArrowUp']) moveZ -= 1;
@@ -1217,7 +1176,7 @@ export class GameScene {
       const yaw = this.cameraController.angleH;
       const sin = Math.sin(yaw);
       const cos = Math.cos(yaw);
-      const speed = BASE_PLAYER_SPEED * this.playerSpeedMultiplier * sprintMultiplier;
+      const speed = BASE_PLAYER_SPEED * this.playerSpeedMultiplier;
       desiredVX = (nx * cos + nz * sin) * speed;
       desiredVZ = (-nx * sin + nz * cos) * speed;
     }
@@ -1245,7 +1204,7 @@ export class GameScene {
         const targetZ = this.localPos.z + stepZ / steps;
 
         if (meAlive) {
-          const res = resolveMovementCollisions(this.localPos.x, this.localPos.z, targetX, targetZ);
+          const res = resolveMovementCollisions(this.localPos.x, this.localPos.z, targetX, targetZ, PLAYER_RADIUS, this.visibilityWalls);
           if (res.collided) this.isCurrentlyColliding = true;
           const actualDx = res.x - this.localPos.x;
           const actualDz = res.z - this.localPos.z;
@@ -1288,13 +1247,6 @@ export class GameScene {
       this.isMoving = false;
     }
 
-    // Dynamic FOV for sprint sensation
-    const targetFov = isSprinting ? 64 : 60;
-    if (Math.abs(this.camera.fov - targetFov) > 0.1) {
-      this.camera.fov = THREE.MathUtils.damp(this.camera.fov, targetFov, 12, delta);
-      this.camera.updateProjectionMatrix();
-    }
-
     // 2. Send position (20 Hz while moving, 5 Hz idle)
     if (canMove) {
       const interval = this.isMoving ? 50 : 200;
@@ -1315,7 +1267,7 @@ export class GameScene {
     if (localModel) {
       localModel.group.position.copy(this.localPos);
       localModel.group.rotation.y = this.localRotation;
-      localModel.updateAnimation(delta * (isSprinting ? 1.4 : 1.0), this.isMoving, this.camera);
+      localModel.updateAnimation(delta, this.isMoving, this.camera);
 
       const isFP = this.cameraController.mode === 'first_person';
       const hidden = isFP || inVent;
@@ -1330,7 +1282,7 @@ export class GameScene {
     // Update Fog of War Room Visibility and Active Security Camera Zone
     const activeCamZone = this.isViewingCameras ? SECURITY_CAMERAS[this.activeCameraIndex]?.zone : undefined;
     this.map3D.isCamerasBeingWatched = this.isViewingCameras;
-    this.map3D.setRoomVisibility(this.currentRoom, !meAlive, activeCamZone, { x: this.localPos.x, z: this.localPos.z });
+    const visibleRooms = new Set<string>();
 
     // 4. Remote players: interpolate, and hide ghosts from the living / vented impostors / players behind walls in other rooms
     for (const [id, target] of this.remoteTargets) {
@@ -1354,7 +1306,7 @@ export class GameScene {
 
       if (p) {
         const canSee = this.canSeeActor(
-          this.localPos.x, this.localPos.z, this.currentRoom,
+          this.localPos.x, this.localPos.z,
           model.group.position.x, model.group.position.z,
           !meAlive, p.isAlive, activeCamZone
         );
@@ -1365,6 +1317,7 @@ export class GameScene {
         // Grace period (280ms) prevents abrupt flickering/popping at doorframes
         const isRecentlyVisible = canSee || (now - lastSeen < 280);
         model.group.visible = p.isAlive ? (!p.inVent && isRecentlyVisible) : (!meAlive);
+        if (model.group.visible) visibleRooms.add(detectRoom(model.group.position.x, model.group.position.z));
         if (model.nameTagMesh) model.nameTagMesh.visible = model.group.visible;
         this.applyGhostLook(id, model, !p.isAlive);
 
@@ -1383,12 +1336,14 @@ export class GameScene {
     // Dead body visibility based on Fog of War & line of sight
     for (const corpse of this.bodyModels.values()) {
       const canSeeBody = this.canSeeActor(
-        this.localPos.x, this.localPos.z, this.currentRoom,
+        this.localPos.x, this.localPos.z,
         corpse.position.x, corpse.position.z,
         !meAlive, true, activeCamZone
       );
       corpse.visible = canSeeBody;
+      if (canSeeBody) visibleRooms.add(detectRoom(corpse.position.x, corpse.position.z));
     }
+    this.map3D.setRoomVisibility(this.currentRoom, !meAlive, activeCamZone, this.localPos, visibleRooms);
 
     // 5. Camera, light, ambience
     this.cameraController.update(delta, this.localPos, this.isMoving);

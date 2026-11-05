@@ -62,7 +62,7 @@ export const MainMenu: React.FC<MenuProps> = ({ onLobbyJoined, initialJoinCode }
     soundEngine.playClick();
     setErrorMessage('');
     const name = sanitizePlayerName(playerName);
-    net.createLobby(name);
+    net.createLobby(name, false, localStorage.getItem('impostor_hat_id') ?? undefined);
     onLobbyJoined();
   };
 
@@ -76,7 +76,7 @@ export const MainMenu: React.FC<MenuProps> = ({ onLobbyJoined, initialJoinCode }
       return;
     }
     const name = sanitizePlayerName(playerName);
-    net.joinLobby(code, name);
+    net.joinLobby(code, name, localStorage.getItem('impostor_hat_id') ?? undefined);
     onLobbyJoined();
   };
 
@@ -170,7 +170,7 @@ export const MainMenu: React.FC<MenuProps> = ({ onLobbyJoined, initialJoinCode }
         <div className="w-full bg-slate-900/90 backdrop-blur-2xl rounded-3xl border-2 border-cyan-500/40 shadow-[0_20px_60px_rgba(0,0,0,0.8)] p-6 sm:p-8 space-y-6">
           {/* Error Banner */}
           {errorMessage && (
-            <div className="p-3 bg-red-950/90 border border-red-600 rounded-2xl text-xs text-red-200 text-center font-black animate-shake shadow-lg">
+            <div role="alert" className="p-3 bg-red-950/90 border border-red-600 rounded-2xl text-xs text-red-200 text-center font-black animate-shake shadow-lg">
               {errorMessage}
             </div>
           )}
@@ -219,7 +219,7 @@ export const MainMenu: React.FC<MenuProps> = ({ onLobbyJoined, initialJoinCode }
           {/* 3. JOIN LOBBY ACTION (CODE INPUT) */}
           <form onSubmit={handleJoinSubmit} className="space-y-3.5">
             <div className="flex items-center justify-between text-xs font-black uppercase tracking-wider text-slate-300">
-              <span className="text-cyan-400">ENTER 5-CHARACTER ROOM CODE</span>
+              <label htmlFor="room-code" className="text-cyan-300">Room code</label>
               <button
                 type="button"
                 onClick={handlePasteCode}
@@ -234,17 +234,26 @@ export const MainMenu: React.FC<MenuProps> = ({ onLobbyJoined, initialJoinCode }
             <div className="relative">
               <input
                 type="text"
+                id="room-code"
+                autoCapitalize="characters"
+                autoComplete="off"
+                spellCheck={false}
+                aria-describedby="room-code-hint"
                 maxLength={5}
                 value={joinCodeInput}
-                onChange={(e) => setJoinCodeInput(e.target.value.toUpperCase())}
+                onChange={(e) => setJoinCodeInput(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
                 placeholder="ABCDE"
                 className="w-full py-3.5 px-4 bg-slate-950/90 border-2 border-slate-700/90 rounded-2xl text-2xl font-black text-center tracking-[0.35em] text-yellow-300 uppercase focus:outline-none focus:border-cyan-400 focus:ring-4 focus:ring-cyan-500/20 transition-all placeholder-slate-700 font-mono shadow-inner"
               />
             </div>
 
+            <p id="room-code-hint" className="text-center text-sm text-slate-300">
+              Enter the five letters or numbers from your host.
+            </p>
             <button
               type="submit"
-              className="w-full py-4 px-6 rounded-2xl font-black text-lg tracking-wider text-white bg-gradient-to-r from-cyan-500 via-sky-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 shadow-[0_8px_25px_rgba(6,182,212,0.35)] active:scale-[0.99] transition-all flex items-center justify-center space-x-2.5 cursor-pointer border border-cyan-300/40"
+              disabled={joinCodeInput.length !== 5}
+              className="w-full py-4 px-6 rounded-2xl font-black text-lg tracking-wider text-white bg-gradient-to-r from-cyan-500 via-sky-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 shadow-[0_8px_25px_rgba(6,182,212,0.35)] active:scale-[0.99] transition-all flex items-center justify-center space-x-2.5 cursor-pointer border border-cyan-300/40 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-cyan-300"
             >
               <LogIn className="w-5 h-5" />
               <span>JOIN LOBBY</span>

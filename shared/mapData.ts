@@ -92,7 +92,7 @@ const room = (
 export const MAP_ROOMS_DETAIL: MapRoom[] = [
   room('cafeteria', 'Cafeteria', '#38bdf8', '#b0c4de',
     [rect(-12, 12, -21, -15), rect(-9, 9, -25, -11)],
-    [[-7, -23], [7, -23], [-7, -13], [7, -13]]),
+    [[-8, -18], [8, -18], [-3, -23], [3, -13]]),
   room('upper_engine', 'Upper Engine', '#a855f7', '#25293e',
     [rect(-44, -30, -24, -16), rect(-42, -32, -26, -14)],
     [[-41, -23], [-33, -23], [-42, -18], [-33, -18]]),
@@ -110,7 +110,7 @@ export const MAP_ROOMS_DETAIL: MapRoom[] = [
     [[-41, 18], [-33, 18], [-41, 23], [-35, 23]]),
   room('electrical', 'Electrical', '#eab308', '#382f2d',
     [rect(-26, -12, 12, 22)],
-    [[-24, 14], [-14, 14], [-22, 20], [-16, 20]]),
+    [[-24, 16.5], [-14, 14], [-22, 20], [-16, 20]]),
   room('storage', 'Storage', '#f97316', '#2d3748',
     [rect(-8, 10, 14, 26)],
     [[-6, 16], [8, 16], [-5, 24], [5, 24]]),
@@ -217,6 +217,30 @@ function buildWalls(): WallSegment[] {
 
 export const MAP_WALLS: WallSegment[] = buildWalls();
 
+export const MAP_DOORS: { roomId: string; wall: WallSegment }[] = [
+  { roomId: 'cafeteria', wall: { x1: -12, z1: -20, x2: -12, z2: -16 } },
+  { roomId: 'cafeteria', wall: { x1: 12, z1: -20, x2: 12, z2: -16 } },
+  { roomId: 'cafeteria', wall: { x1: -2, z1: -11, x2: 2, z2: -11 } },
+  { roomId: 'medbay', wall: { x1: -23, z1: -13, x2: -19, z2: -13 } },
+  { roomId: 'medbay', wall: { x1: -21, z1: -7, x2: -17, z2: -7 } },
+  { roomId: 'upper_engine', wall: { x1: -30, z1: -20, x2: -30, z2: -16 } },
+  { roomId: 'upper_engine', wall: { x1: -41, z1: -14, x2: -37, z2: -14 } },
+  { roomId: 'lower_engine', wall: { x1: -41, z1: 14, x2: -37, z2: 14 } },
+  { roomId: 'lower_engine', wall: { x1: -30, z1: 17, x2: -30, z2: 21 } },
+  { roomId: 'electrical', wall: { x1: -21, z1: 12, x2: -17, z2: 12 } },
+  { roomId: 'electrical', wall: { x1: -26, z1: 17, x2: -26, z2: 21 } },
+  { roomId: 'electrical', wall: { x1: -12, z1: 17, x2: -12, z2: 21 } },
+  { roomId: 'security', wall: { x1: -30, z1: -3, x2: -30, z2: 1 } },
+  { roomId: 'security', wall: { x1: -23, z1: -3, x2: -23, z2: 1 } },
+  { roomId: 'storage', wall: { x1: -2, z1: 14, x2: 2, z2: 14 } },
+  { roomId: 'storage', wall: { x1: -8, z1: 17, x2: -8, z2: 21 } },
+  { roomId: 'storage', wall: { x1: 10, z1: 22, x2: 10, z2: 26 } },
+];
+
+export function getClosedDoorWalls(lockedRooms: string[]): WallSegment[] {
+  return MAP_DOORS.filter((door) => lockedRooms.includes(door.roomId)).map((door) => door.wall);
+}
+
 export interface MapObstacle {
   id: string;
   type: 'circle' | 'box';
@@ -282,26 +306,6 @@ export const MAP_OBSTACLES: MapObstacle[] = [
   { id: 'comms_server_racks', type: 'box', name: 'Comms Server Racks', x: 17.8, z: 24, radius: 0, minX: 17.3, maxX: 18.3, minZ: 22.1, maxZ: 25.9 },
   { id: 'comms_desk', type: 'box', name: 'Communications Desk', x: 22.2, z: 24, radius: 0, minX: 21.0, maxX: 23.4, minZ: 23.4, maxZ: 24.6 },
 ];
-
-/** Cells whose full 3x3 neighbourhood is floor: safe centres for bots to path through. */
-const navGrid = new Uint8Array(GRID.cols * GRID.rows);
-for (let j = 0; j < GRID.rows; j++) {
-  for (let i = 0; i < GRID.cols; i++) {
-    let ok = true;
-    for (let dj = -1; dj <= 1 && ok; dj++) {
-      for (let di = -1; di <= 1; di++) {
-        if (!cellFloor(i + di, j + dj)) {
-          ok = false;
-          break;
-        }
-      }
-    }
-    navGrid[j * GRID.cols + i] = ok ? 1 : 0;
-  }
-}
-
-export const navWalkable = (i: number, j: number): boolean =>
-  i >= 0 && j >= 0 && i < GRID.cols && j < GRID.rows && navGrid[j * GRID.cols + i] === 1;
 
 export const worldToCell = (x: number, z: number) => ({
   i: Math.floor(x - GRID.minX),
