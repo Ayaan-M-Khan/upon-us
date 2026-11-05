@@ -38,6 +38,8 @@ export class CameraController {
 
   public toggleViewMode(): CameraViewMode {
     this.mode = this.mode === 'third_person' ? 'first_person' : 'third_person';
+    this.focusReady = false;
+    this.stopDrag();
     if (this.mode === 'third_person') {
       this.angleV = CameraController.FIXED_TOP_DOWN_PITCH;
     } else {
@@ -49,12 +51,6 @@ export class CameraController {
   // Listeners are named so they can be removed on dispose (previously every mount of the
   // game view stacked another set), and dragging is cleared on pointercancel / blur so the
   // camera can never get "stuck" rotating with the mouse.
-  private onKeyDown = (e: KeyboardEvent): void => {
-    const el = e.target as HTMLElement | null;
-    if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) return;
-    if (e.code === 'KeyV' && !e.repeat) this.toggleViewMode();
-  };
-
   private onPointerDown = (e: PointerEvent): void => {
     // Only drag-rotate when the press lands on the 3D canvas, not on HUD buttons / menus.
     if (!(e.target instanceof HTMLCanvasElement)) return;
@@ -87,7 +83,6 @@ export class CameraController {
   };
 
   private setupListeners(): void {
-    window.addEventListener('keydown', this.onKeyDown);
     window.addEventListener('pointerdown', this.onPointerDown);
     window.addEventListener('pointermove', this.onPointerMove);
     window.addEventListener('pointerup', this.stopDrag);
@@ -97,7 +92,6 @@ export class CameraController {
   }
 
   public dispose(): void {
-    window.removeEventListener('keydown', this.onKeyDown);
     window.removeEventListener('pointerdown', this.onPointerDown);
     window.removeEventListener('pointermove', this.onPointerMove);
     window.removeEventListener('pointerup', this.stopDrag);

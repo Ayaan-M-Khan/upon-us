@@ -13,6 +13,8 @@ type StartingListener = (countdown: number) => void;
 type MovementListener = (players: Record<string, { x: number; z: number; rotation: number; isMoving: boolean }>) => void;
 type GameStartedListener = (data: { map: string; settings: GameSettings }) => void;
 type StateSnapshotListener = (snapshot: GameStateSnapshot) => void;
+export type ConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'offline';
+type ConnectionStateListener = (state: ConnectionState) => void;
 export type PlayerKilledListener = (data: { victimId: string; killerId?: string; x?: number; z?: number }) => void;
 
 class NetworkManager {
@@ -27,6 +29,9 @@ class NetworkManager {
   private chatListeners: Set<(m: ChatMessage) => void> = new Set();
   private gameOverListeners: Set<(g: GameOverInfo) => void> = new Set();
   private currentLobby: LobbyData | null = null;
+  private connectionState: ConnectionState = 'connecting';
+  private connectionStateListeners: Set<ConnectionStateListener> = new Set();
+  private hasConnected = false;
 
   public init(): void {
     if (this.socket) return;
@@ -39,8 +44,18 @@ class NetworkManager {
     });
 
     this.socket.on('connect', () => {
+      this.hasConnected = true;
+      this.setConnectionState('connected');
       console.log('[Net] Connected to server, socketId:', this.socket?.id);
     });
+
+    this.socket.on('connect_error', () => {
+      this.setConnectionState(this.socket?.active ? (this.hasConnected ? 'reconnecting' : 'connecting') : 'offline');
+    });
+    this.socket.io.on('reconnect_attempt', () => {
+      this.setConnectionState(this.hasConnected ? 'reconnecting' : 'connecting');
+    });
+    this.socket.io.on('reconnect_failed', () => this.setConnectionState('offline'));
 
     this.socket.on(EVENTS.LOBBY_STATE, (data: LobbyData) => {
       this.currentLobby = data;
@@ -77,8 +92,41 @@ class NetworkManager {
     });
 
     this.socket.on('disconnect', () => {
+      // The server removes this connection's player on disconnect.
+      this.currentLobby = null;
+      this.lobbyStateListeners.forEach((cb) => cb(null));
+      this.setConnectionState(this.socket?.active ? 'reconnecting' : 'offline');
       console.log('[Net] Disconnected from server');
     });
+  }
+
+  private setConnectionState(state: ConnectionState): void {
+    if (state === this.connectionState) return;
+    this.connectionState = state;
+    this.connectionStateListeners.forEach((cb) => cb(state));
+  }
+
+  public getConnectionState(): ConnectionState {
+    return this.connectionState;
+  }
+
+  public onConnectionState(cb: ConnectionStateListener): () => void {
+    this.connectionStateListeners.add(cb);
+    cb(this.connectionState);
+    return () => this.connectionStateListeners.delete(cb);
+  }
+
+  public retryConnection(): void {
+    if (this.socket?.connected) {
+      this.setConnectionState('connected');
+      return;
+    }
+    if (!this.socket) {
+      this.init();
+      return;
+    }
+    this.setConnectionState(this.hasConnected ? 'reconnecting' : 'connecting');
+    this.socket.connect();
   }
 
   public getSocketId(): string | undefined {

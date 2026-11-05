@@ -20,6 +20,8 @@ import {
   ChevronUp,
   Boxes,
   Wrench,
+  Check,
+  Navigation,
 } from 'lucide-react';
 import { GAME_STATES } from '../../shared/constants';
 import { GameStateSnapshot } from '../../shared/events';
@@ -84,9 +86,9 @@ const ActionButton: React.FC<{
         soundEngine.playClick();
         onClick();
       }}
-      className={`relative flex flex-col items-center justify-center w-[4.5rem] h-[4.5rem] sm:w-20 sm:h-20 rounded-3xl font-black border-2 transition-all ${
+      className={`relative flex flex-col items-center justify-center w-14 h-14 sm:w-[4.25rem] sm:h-[4.25rem] rounded-2xl font-bold border transition-all ${
         enabled
-          ? `bg-gradient-to-br ${tones[tone]} text-white cursor-pointer active:scale-95`
+          ? `bg-gradient-to-br ${tones[tone]} text-white cursor-pointer active:scale-95 hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-cyan-200`
           : 'bg-slate-900/80 border-slate-700 text-slate-500 cursor-not-allowed opacity-70'
       }`}
     >
@@ -361,6 +363,7 @@ export const GameHud: React.FC<GameHudProps> = ({
   const [showMap, setShowMap] = useState(false);
   const [showSabotageModal, setShowSabotageModal] = useState(false);
   const [showTasks, setShowTasks] = useState(true);
+  const [trackedTaskKey, setTrackedTaskKey] = useState<string | null>(null);
   const [now, setNow] = useState(performance.now());
   useEffect(() => {
     if (!work) return;
@@ -390,8 +393,9 @@ export const GameHud: React.FC<GameHudProps> = ({
   // Key listeners for Map (M/Tab), Sabotage (C), Camera Toggle (V), and Escape
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (work || e.repeat || e.defaultPrevented) return;
       const el = e.target as HTMLElement | null;
-      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) return;
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
       if (e.code === 'KeyM' || e.code === 'Tab') {
         e.preventDefault();
         soundEngine.playClick();
@@ -415,54 +419,67 @@ export const GameHud: React.FC<GameHudProps> = ({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isImpostor, playing, onToggleCamera]);
+  }, [isImpostor, playing, onToggleCamera, work]);
 
   const workPct = work ? Math.min(100, ((now - work.startedAt) / (work.hold * 1000)) * 100) : 0;
   const commsJammed = snapshot?.sabotage?.type === 'comms';
   const myTasks = commsJammed ? [] : you?.tasks || [];
+  const completedTasks = myTasks.filter((task) => task.done).length;
   const cooldownSecs = you ? Math.ceil(you.killCooldownMs / 1000) : 0;
 
   return (
-    <div className="absolute inset-0 pointer-events-none select-none z-20 flex flex-col justify-between p-4">
+    <div className="absolute inset-0 pointer-events-none select-none z-20 flex flex-col justify-between p-2 sm:p-4">
       {snapshot?.sabotage?.type === 'lights' && (
         <div className="absolute inset-0 bg-black/25 pointer-events-none" aria-hidden="true" />
       )}
       {/* TOP BAR */}
       <div className="w-full flex items-start justify-between">
         {/* Left: task progress bar + task list (like the original) */}
-        <div className="pointer-events-auto w-60 sm:w-72">
-          <div className="relative h-6 rounded-md bg-slate-900/85 border-2 border-slate-600 overflow-hidden">
-            <div className="h-full bg-gradient-to-r from-green-500 to-emerald-400 transition-all duration-500" style={{ width: `${progress}%` }} />
-            <div className="absolute inset-0 flex items-center justify-center text-[11px] font-black tracking-widest text-white drop-shadow">
-              TOTAL TASKS COMPLETED
+        <div className="hud-task-panel pointer-events-auto">
+          <div className="flight-panel px-3 py-2.5">
+            <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-[0.16em] mb-2 text-slate-400">
+              <span>Crew progress</span><span className="text-emerald-300 tabular-nums">{commsJammed ? 'OFFLINE' : progress + '%'}</span>
+            </div>
+            <div className="h-1.5 rounded-full bg-slate-700/60 overflow-hidden" role="progressbar" aria-label="Crew task progress" aria-valuenow={commsJammed ? undefined : progress} aria-valuemin={0} aria-valuemax={100}>
+              <div className="h-full rounded-full bg-emerald-400 transition-[width] duration-700" style={{ width: commsJammed ? '0%' : progress + '%' }} />
             </div>
           </div>
-          <div className="mt-1.5 rounded-xl bg-slate-900/80 border border-slate-700 backdrop-blur-md overflow-hidden">
+          <div className="flight-panel mt-2 overflow-hidden">
             <button
-              onClick={() => setShowTasks((v) => !v)}
-              className="w-full flex items-center justify-between px-3 py-1.5 text-[11px] font-black tracking-widest text-slate-200 cursor-pointer"
+              onClick={() => setShowTasks((value) => !value)}
+              aria-expanded={showTasks}
+              aria-controls="flight-task-list"
+              className="w-full flex items-center justify-between px-3 py-2.5 text-xs font-bold text-slate-200 cursor-pointer focus-visible:outline-2 focus-visible:outline-cyan-300"
             >
-              <span>{isImpostor ? 'FAKE TASKS' : 'TASKS'}</span>
-              {showTasks ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+              <span>{isImpostor ? 'Fake tasks' : 'Your tasks'} <span className="text-slate-500 ml-1 tabular-nums">{commsJammed ? '—' : completedTasks + '/' + myTasks.length}</span></span>
+              {showTasks ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
             </button>
             {showTasks && (
-              <div className="px-3 pb-2 space-y-0.5 text-[12px] font-bold">
-                {snapshot?.sabotage?.commsDisabled && !isImpostor ? (
-                  <div className="text-red-400 font-mono text-xs py-1.5 flex items-center space-x-1.5 animate-pulse">
-                    <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
-                    <span>COMMS OFFLINE: SENSORS BLIND</span>
-                  </div>
+              <div id="flight-task-list" className="hud-task-list px-1.5 pb-1.5 space-y-1">
+                {commsJammed ? (
+                  <div className="text-amber-200 text-xs p-2 flex items-center gap-2"><AlertTriangle className="w-4 h-4 shrink-0" />Restore communications to view tasks.</div>
                 ) : (
                   <>
-                    {myTasks.length === 0 && <div className="text-slate-500">No tasks</div>}
-                    {myTasks.map((t) => (
-                      <div
-                        key={t.taskId}
-                        className={t.done ? 'text-green-400 line-through' : t.step > 0 ? 'text-yellow-300' : 'text-white'}
+                    {myTasks.length === 0 && <p className="px-2 py-3 text-xs text-slate-400">No tasks assigned.</p>}
+                    {[...myTasks].sort((a, b) => Number(a.done) - Number(b.done)).map((task) => (
+                      <button
+                        key={task.taskId}
+                        disabled={task.done || !playing || !!work}
+                        onClick={() => { soundEngine.playClick(); setTrackedTaskKey(task.taskId + ":" + task.step); onSetWaypoint(task.x, task.z); }}
+                        aria-pressed={!task.done && trackedTaskKey === task.taskId + ":" + task.step}
+                        title={task.done ? 'Completed' : 'Mark station on your map'}
+                        className={`task-checklist-row w-full text-left flex gap-2.5 px-2 py-2 rounded-lg transition-colors focus-visible:outline-2 focus-visible:outline-cyan-300 ${task.done ? 'text-slate-500' : (ctx.taskId === task.taskId || trackedTaskKey === task.taskId + ':' + task.step) ? 'bg-cyan-400/10 text-cyan-100 border border-cyan-400/20' : 'text-slate-200 hover:bg-white/5 cursor-pointer border border-transparent'}`}
                       >
-                        {t.room}: {t.name}
-                        {t.totalSteps > 1 ? ` (${Math.min(t.step, t.totalSteps)}/${t.totalSteps})` : ''}
-                      </div>
+                        <span className={`mt-0.5 w-4 h-4 shrink-0 rounded-full border flex items-center justify-center ${task.done ? 'border-emerald-500/50 text-emerald-400' : 'border-slate-500'}`}>
+                          {task.done ? <Check className="w-3 h-3" /> : <Navigation className="w-2.5 h-2.5" />}
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-[10px] font-semibold uppercase tracking-wider text-slate-400">{task.room.replaceAll('_', ' ')}</span>
+                          <span className={`block text-xs leading-snug font-semibold ${task.done ? 'line-through' : ''}`}>{task.name}</span>
+                          {!task.done && trackedTaskKey === task.taskId + ":" + task.step && <span className="block text-[10px] text-cyan-300 mt-1">{ctx.taskId === task.taskId ? "Station in reach · press E" : "Route marked on map"}</span>}
+                          {!task.done && task.totalSteps > 1 && <span className="block text-[10px] text-slate-400 mt-0.5">Step {task.step + 1} of {task.totalSteps}</span>}
+                        </span>
+                      </button>
                     ))}
                   </>
                 )}
@@ -482,10 +499,10 @@ export const GameHud: React.FC<GameHudProps> = ({
         </div>
 
         {/* Center: room banner */}
-        <div className="flex flex-col items-center">
-          <div className="bg-slate-900/90 backdrop-blur-md px-6 py-2 rounded-2xl border-2 border-slate-700/90 shadow-2xl flex items-center space-x-2.5">
+        <div className="hidden md:flex flex-col items-center">
+          <div className="flight-panel px-5 py-2.5 flex items-center space-x-2.5">
             <div className="w-3 h-3 rounded-full bg-cyan-400 shadow-[0_0_8px_rgba(56,189,248,0.8)] animate-pulse" />
-            <span className="text-base sm:text-lg font-black tracking-widest uppercase text-cyan-200">
+            <span className="text-sm font-semibold tracking-widest uppercase text-slate-200">
               {currentRoom}
             </span>
           </div>
@@ -519,14 +536,15 @@ export const GameHud: React.FC<GameHudProps> = ({
           </div>
         )}
 
-        {/* Right: Hitbox wireframe, Map, camera, settings, exit */}
-        <div className="flex items-center space-x-2 pointer-events-auto">
+        {/* Map, camera, settings and exit */}
+        <div className="flex items-center gap-1 sm:gap-2 pointer-events-auto">
+          {import.meta.env.DEV && (
           <button
             onClick={() => {
               soundEngine.playClick();
               onToggleHitboxes?.();
             }}
-            className={`p-2.5 rounded-2xl backdrop-blur-md border-2 transition-all cursor-pointer shadow-xl flex items-center space-x-1.5 ${
+            className={`p-2.5 rounded-2xl backdrop-blur-md border-2 transition-all cursor-pointer shadow-xl hidden sm:flex items-center space-x-1.5 ${
               showHitboxes
                 ? 'bg-emerald-500 border-emerald-300 text-slate-950 font-black shadow-[0_0_15px_rgba(52,211,153,0.5)]'
                 : 'bg-slate-900/85 hover:bg-slate-800 border-slate-700/80 text-emerald-400'
@@ -538,6 +556,7 @@ export const GameHud: React.FC<GameHudProps> = ({
               {showHitboxes ? 'HITBOX: ON' : 'HITBOX'}
             </span>
           </button>
+          )}
           <button
             onClick={() => {
               soundEngine.playClick();
@@ -557,7 +576,8 @@ export const GameHud: React.FC<GameHudProps> = ({
               onToggleCamera();
             }}
             className="p-2.5 rounded-2xl bg-slate-900/85 hover:bg-slate-800 backdrop-blur-md border-2 border-slate-700/80 text-slate-200 hover:text-white transition-all cursor-pointer shadow-xl"
-            title="Toggle First / Third Person (V key)"
+            aria-label={cameraMode === 'first_person' ? 'Switch to third person (V)' : 'Switch to first person (V)'}
+            title={cameraMode === 'first_person' ? 'Switch to third person (V)' : 'Switch to first person (V)'}
           >
             {cameraMode === 'third_person' ? <Eye className="w-5 h-5 text-cyan-400" /> : <Video className="w-5 h-5 text-yellow-400" />}
           </button>
@@ -701,7 +721,7 @@ export const GameHud: React.FC<GameHudProps> = ({
             ) : (
               <ActionButton
                 tone="use"
-                label={ctx.emergency ? 'EMERGENCY' : (ctx.canUseCameras ? 'CAMERAS' : 'USE')}
+                label={ctx.emergency ? 'MEETING' : (ctx.canUseCameras ? 'CAMERAS' : 'USE')}
                 hint="[E]"
                 enabled={!!playing && !inVent && !work && (ctx.emergency || !!ctx.taskId || !!ctx.canUseCameras)}
                 onClick={() => {

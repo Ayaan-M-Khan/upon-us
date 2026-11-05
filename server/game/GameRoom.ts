@@ -44,13 +44,14 @@ import {
   EMERGENCY_BUTTON_POS,
   EMERGENCY_BUTTON_RANGE,
   MAP_VENTS,
+  MAP_WALLS,
   detectRoom,
   getClosedDoorWalls,
   getRoomSpot,
   getSpawnPosition,
 } from '../../shared/mapData';
 import { findPath } from '../../shared/nav';
-import { lineIntersectsWalls, resolveMovementCollisions } from '../../shared/physics';
+import { PLAYER_RADIUS, lineIntersectsWalls, resolveMovementCollisions } from '../../shared/physics';
 import { assignRoles } from './roles';
 import { SabotageManager } from './sabotage';
 import { GameStateMachine } from './stateMachine';
@@ -247,13 +248,19 @@ export class GameRoom {
       dx = (dx / d) * maxStep;
       dz = (dz / d) * maxStep;
     }
-    let nx = p.x + dx;
-    let nz = p.z + dz;
+    let nx = p.x;
+    let nz = p.z;
     if (p.isAlive) {
-      if (lineIntersectsWalls(p.x, p.z, nx, nz, this.closedDoorWalls()).hit) return;
-      const r = resolveMovementCollisions(p.x, p.z, nx, nz);
-      nx = r.x;
-      nz = r.z;
+      const walls = [...MAP_WALLS, ...this.closedDoorWalls()];
+      const steps = Math.max(1, Math.ceil(Math.hypot(dx, dz) / 0.18));
+      for (let step = 0; step < steps; step++) {
+        const resolved = resolveMovementCollisions(nx, nz, nx + dx / steps, nz + dz / steps, PLAYER_RADIUS, walls);
+        nx = resolved.x;
+        nz = resolved.z;
+      }
+    } else {
+      nx += dx;
+      nz += dz;
     }
     p.x = nx;
     p.z = nz;
@@ -1115,6 +1122,15 @@ export class GameRoom {
     if (!shouldThink) return;
     b.thinkAt = now + 250 + Math.random() * 150;
 
+    // Sabotage remains available while hunting and after an impostor becomes a ghost.
+    if (!activeSab && bot.role === 'impostor' && this.sabotageManager.getCooldownRemainingSecs(now) === 0) {
+      if (Math.random() < 0.04) {
+        const types: SabotageType[] = ['reactor', 'o2', 'lights', 'comms'];
+        const chosen = types[Math.floor(Math.random() * types.length)];
+        this.triggerSabotage(bot.id, chosen);
+      }
+    }
+
     // --- 2. Impostor hunting ---
     if (bot.role === 'impostor' && bot.isAlive) {
       if (b.mode === 'flee') {
@@ -1186,13 +1202,6 @@ export class GameRoom {
     if (b.mode === 'repair') {
       b.mode = 'idle';
       b.path = [];
-    }
-    if (!activeSab && bot.isAlive && bot.role === 'impostor' && this.sabotageManager.getCooldownRemainingSecs(now) === 0) {
-      if (Math.random() < 0.04) {
-        const types: SabotageType[] = ['reactor', 'o2', 'lights', 'comms'];
-        const chosen = types[Math.floor(Math.random() * types.length)];
-        this.triggerSabotage(bot.id, chosen);
-      }
     }
 
     // --- 3. Tasks / wandering ---

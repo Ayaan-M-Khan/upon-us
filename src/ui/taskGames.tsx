@@ -210,6 +210,7 @@ const AlignGame: React.FC<GameProps> = ({ finish }) => {
         onChange={(e) => setValue(Number(e.target.value))}
         onPointerUp={() => ok && finish()}
         onKeyUp={() => ok && finish()}
+        aria-label="Engine output alignment"
         className="w-full accent-cyan-400"
       />
       <div className="text-center text-xs text-slate-400">Slide until the bar sits on the green line, then let go.</div>
@@ -349,6 +350,8 @@ const DivertGame: React.FC<GameProps> = ({ step, finish }) => {
               value={v}
               onChange={(e) => setV(Number(e.target.value))}
               onPointerUp={() => (v >= 98 ? finish() : setV(0))}
+              onKeyUp={() => v >= 98 && finish()}
+              aria-label="Divert power lever"
               className="accent-yellow-400"
               style={{ width: 190, transform: 'rotate(-90deg)' }}
             />
@@ -507,16 +510,17 @@ const HoldGame: React.FC<GameProps & { label: string; seconds: number; auto?: bo
   const [started, setStarted] = useState(false);
   const finished = useRef(false);
   const active = auto ? started : holding;
+  const progress = useRef(0);
   useRaf((dt) => {
-    setPct((p) => {
-      const n = active ? p + (dt / seconds) * 100 : auto ? p : Math.max(0, p - dt * 60);
-      if (n >= 100 && !finished.current) {
-        finished.current = true;
-        setTimeout(finish, 0);
-      }
-      return Math.min(100, n);
-    });
-  }, true);
+    progress.current = active
+      ? Math.min(100, progress.current + (dt / seconds) * 100)
+      : Math.max(0, progress.current - dt * 60);
+    setPct(progress.current);
+    if (progress.current >= 100 && !finished.current) {
+      finished.current = true;
+      finish();
+    }
+  }, !finished.current && (active || pct > 0));
   return (
     <div className="w-full max-w-sm flex flex-col items-center space-y-4">
       <div className="text-sm text-slate-200 text-center">{hint}</div>
@@ -529,6 +533,14 @@ const HoldGame: React.FC<GameProps & { label: string; seconds: number; auto?: bo
         onPointerUp={() => !auto && setHolding(false)}
         onPointerLeave={() => !auto && setHolding(false)}
         onPointerCancel={() => !auto && setHolding(false)}
+        onKeyDown={(event) => {
+          if (event.key !== ' ' && event.key !== 'Enter') return;
+          event.preventDefault();
+          if (auto) setStarted(true);
+          else setHolding(true);
+        }}
+        onKeyUp={() => !auto && setHolding(false)}
+        onBlur={() => !auto && setHolding(false)}
       >
         {label}
       </button>
@@ -691,6 +703,27 @@ const SampleGame: React.FC<GameProps> = ({ step, finish }) => {
 // ---------------------------------------------------------------------------
 // Dispatcher + frame
 // ---------------------------------------------------------------------------
+const TASK_HINTS: Record<string, string> = {
+  fix_wiring: 'Drag each wire to the matching terminal.',
+  swipe_card: 'Drag your card through the reader at a steady speed.',
+  align_engine_upper: 'Move the slider onto the green target line, then release it.',
+  align_engine_lower: 'Move the slider onto the green target line, then release it.',
+  clean_o2: 'Tap every leaf to clear the filter.',
+  prime_shields: 'Activate every inactive shield panel.',
+  calibrate_distributor: 'Press STOP when each moving bar enters the green zone.',
+  divert_power: 'Redirect power, then accept it at the next station.',
+  unlock_manifolds: 'Select the numbers in order from 1 to 10.',
+  chart_course: 'Follow the plotted route in order.',
+  stabilize_steering: 'Tap the moving target three times to stabilize steering.',
+  scan_boarding: 'Hold the scan control until the reading is complete.',
+  clear_asteroids: 'Target and clear the incoming asteroids.',
+  fuel_engines: 'Hold to transfer fuel at this station.',
+  empty_garbage: 'Hold the lever to clear the chute.',
+  download_data: 'Start the transfer and wait for it to finish.',
+  start_reactor: 'Watch the pattern, then repeat it.',
+  inspect_sample: 'Analyze the samples, then select the unusual vial.',
+};
+
 const renderGame = (taskId: string, step: number, finish: () => void): React.ReactNode => {
   const p = { step, finish };
   switch (taskId) {
@@ -725,11 +758,25 @@ export const TaskGame: React.FC<{
   onClose: () => void;
 }> = ({ taskId, name, step, totalSteps, onComplete, onClose }) => {
   const [done, setDone] = useState(false);
+  const finishing = useRef(false);
+  const completeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    setDone(false);
+    finishing.current = false;
+    return () => {
+      if (completeTimer.current !== null) clearTimeout(completeTimer.current);
+      completeTimer.current = null;
+      finishing.current = true;
+    };
+  }, [taskId, step]);
   const finish = useCallback(() => {
-    setDone((d) => {
-      if (!d) setTimeout(onComplete, 700);
-      return true;
-    });
+    if (finishing.current) return;
+    finishing.current = true;
+    setDone(true);
+    completeTimer.current = setTimeout(() => {
+      completeTimer.current = null;
+      onComplete();
+    }, 700);
   }, [onComplete]);
 
   useEffect(() => {
@@ -741,21 +788,34 @@ export const TaskGame: React.FC<{
   }, [onClose]);
 
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/55 backdrop-blur-sm p-4 pointer-events-auto">
-      <div className="relative w-full max-w-lg rounded-3xl border-2 border-cyan-500/70 bg-slate-900/95 shadow-2xl p-5 flex flex-col items-center">
-        <button onClick={onClose} className="absolute top-3 right-3 p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer" title="Close [Esc]">
-          <X className="w-5 h-5" />
-        </button>
-        <div className="text-lg font-black tracking-wider text-cyan-300">{name.toUpperCase()}</div>
-        {totalSteps > 1 && <div className="text-[11px] font-bold text-slate-400 mb-3">STEP {step + 1} OF {totalSteps}</div>}
-        {totalSteps <= 1 && <div className="mb-3" />}
-        <div className="w-full flex justify-center min-h-[12rem]" key={`${taskId}:${step}`}>
+    <div className="task-overlay fixed inset-0 z-40 flex items-center justify-center bg-slate-950/70 backdrop-blur-md p-3 sm:p-6 pointer-events-auto">
+      <div role="dialog" aria-modal="true" aria-labelledby="task-title" aria-describedby="task-instructions" className="task-console relative w-full max-w-lg rounded-2xl border border-slate-600/60 bg-[#101b2b] shadow-2xl overflow-hidden max-h-[94dvh] overflow-y-auto">
+        <div className="h-1 bg-gradient-to-r from-cyan-300 via-sky-500 to-indigo-500" />
+        <header className="flex items-start justify-between gap-4 px-5 pt-5 pb-4 border-b border-white/5">
+          <div>
+            <p className="text-[10px] font-bold tracking-[0.22em] uppercase text-cyan-300 mb-1.5">Ship systems</p>
+            <h2 id="task-title" className="text-xl sm:text-2xl font-bold text-slate-100 leading-tight">{name}</h2>
+          </div>
+          <button onClick={onClose} className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 cursor-pointer focus-visible:outline-2 focus-visible:outline-cyan-300" aria-label="Close task" title="Close [Esc]">
+            <X className="w-4 h-4" />
+          </button>
+        </header>
+        <div className="px-5 pt-4">
+          <div className="flex justify-between text-[11px] font-semibold text-slate-400 mb-2"><span>Station progress</span><span>{step + 1} / {totalSteps}</span></div>
+          <div className="flex gap-1.5" aria-hidden="true">
+            {Array.from({ length: totalSteps }, (_, index) => <div key={index} className={`h-1 flex-1 rounded-full ${index < step ? 'bg-emerald-400' : index === step ? 'bg-cyan-400' : 'bg-slate-700'}`} />)}
+          </div>
+          <p id="task-instructions" className="text-sm text-slate-300 leading-relaxed my-4">{TASK_HINTS[taskId] || 'Use the station controls to complete this task.'}</p>
+        </div>
+        <div className="task-workspace mx-3 sm:mx-5 mb-5 rounded-xl p-3 sm:p-4 bg-slate-950/40 border border-white/5 flex justify-center min-h-[12rem]" key={`${taskId}:${step}`}>
           {renderGame(taskId, step, finish)}
         </div>
+        <footer className="flex items-center justify-between px-5 py-3 border-t border-white/5 text-[10px] text-slate-500"><span>Connected to station</span><span>ESC to close</span></footer>
         {done && (
-          <div className="absolute inset-0 rounded-3xl bg-emerald-950/85 flex flex-col items-center justify-center">
-            <Check className="w-16 h-16 text-emerald-300" />
-            <div className="text-xl font-black text-emerald-200 tracking-widest mt-2">TASK COMPLETE</div>
+          <div role="status" className="task-success absolute inset-0 rounded-2xl bg-[#0d2426]/95 flex flex-col items-center justify-center gap-3">
+            <div className="task-success-ring rounded-full p-4 border border-emerald-400/40 bg-emerald-400/10"><Check className="w-10 h-10 text-emerald-300" /></div>
+            <div className="text-xl font-bold text-emerald-100">{step + 1 < totalSteps ? 'Step complete' : 'Task complete'}</div>
+            <div className="text-sm text-emerald-200/60">{step + 1 < totalSteps ? 'Continue at the next station.' : 'Systems updated.'}</div>
           </div>
         )}
       </div>

@@ -98,11 +98,11 @@ export const MainMenu: React.FC<MenuProps> = ({ onLobbyJoined, initialJoinCode }
       {/* Dynamic Starfield Background with Twinkling Layers */}
       <div className="absolute inset-0 pointer-events-none overflow-hidden">
         {/* Layer 1: Tiny distant stars */}
-        <div className="absolute inset-0 opacity-70 bg-[radial-gradient(#38bdf8_1px,transparent_1px)] [background-size:28px_28px] animate-twinkle-1" />
+        <div className="absolute inset-0 opacity-35 bg-[radial-gradient(#bae6fd_1px,transparent_1px)] [background-size:93px_107px]" />
         {/* Layer 2: Medium glowing stars */}
-        <div className="absolute inset-0 opacity-55 bg-[radial-gradient(#f8fafc_1.5px,transparent_1.5px)] [background-size:64px_64px] animate-twinkle-2" />
+        <div className="absolute inset-0 opacity-40 bg-[radial-gradient(#f8fafc_1px,transparent_1px)] [background-size:157px_173px] [background-position:41px_27px] animate-twinkle-2" />
         {/* Layer 3: Brighter cosmic clusters */}
-        <div className="absolute inset-0 opacity-40 bg-[radial-gradient(#818cf8_2px,transparent_2px)] [background-size:120px_120px] animate-twinkle-3" />
+        <div className="absolute inset-0 opacity-30 bg-[radial-gradient(#a5b4fc_1.5px,transparent_1.5px)] [background-size:239px_211px] [background-position:73px_93px]" />
 
         {/* Deep space nebula clouds */}
         <div className="absolute -top-32 -left-32 w-96 h-96 rounded-full bg-cyan-600/10 blur-3xl pointer-events-none animate-float-dust" />
@@ -167,7 +167,7 @@ export const MainMenu: React.FC<MenuProps> = ({ onLobbyJoined, initialJoinCode }
         </div>
 
         {/* Space Console Terminal Card */}
-        <div className="w-full bg-slate-900/90 backdrop-blur-2xl rounded-3xl border-2 border-cyan-500/40 shadow-[0_20px_60px_rgba(0,0,0,0.8)] p-6 sm:p-8 space-y-6">
+        <div className="w-full bg-slate-900/85 backdrop-blur-2xl rounded-3xl border border-slate-500/30 shadow-[0_20px_60px_rgba(0,0,0,0.5)] p-6 sm:p-8 space-y-6">
           {/* Error Banner */}
           {errorMessage && (
             <div role="alert" className="p-3 bg-red-950/90 border border-red-600 rounded-2xl text-xs text-red-200 text-center font-black animate-shake shadow-lg">

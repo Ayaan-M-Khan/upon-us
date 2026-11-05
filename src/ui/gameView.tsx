@@ -43,6 +43,7 @@ export interface WorkState {
   step: number;
   totalSteps: number;
   startedAt: number;
+  startedAlive: boolean;
 }
 
 export const GameView: React.FC<GameViewProps> = ({ settings, onLeave }) => {
@@ -65,6 +66,7 @@ export const GameView: React.FC<GameViewProps> = ({ settings, onLeave }) => {
   const [activeSabotageGame, setActiveSabotageGame] = useState<{ partId: number; type: SabotageType } | null>(null);
   const [gameOver, setGameOver] = useState<GameOverInfo | null>(null);
   const workRef = useRef<WorkState | null>(null);
+  const completionTimer = useRef<number | null>(null);
   workRef.current = work;
 
   const socketId = net.getSocketId() || '';
@@ -107,28 +109,40 @@ export const GameView: React.FC<GameViewProps> = ({ settings, onLeave }) => {
 
   // ---- Task work (hold at a station) ----
   const stopWork = useCallback((notifyServer: boolean) => {
+    if (completionTimer.current !== null) {
+      window.clearTimeout(completionTimer.current);
+      completionTimer.current = null;
+    }
     if (notifyServer) net.cancelTask();
+    workRef.current = null;
     setWork(null);
-    if (sceneRef.current) sceneRef.current.movementLocked = false;
+    if (sceneRef.current) sceneRef.current.movementLocked = sceneRef.current.isViewingCameras;
   }, []);
 
   // The 2D mini-game reports success; we still respect the server's minimum task time.
   const completeWork = useCallback(() => {
     const w = workRef.current;
-    if (!w) return;
-    soundEngine.playTaskComplete();
+    if (!w || completionTimer.current !== null) return;
     const wait = Math.max(0, w.hold * 1000 - (performance.now() - w.startedAt) + 150);
-    window.setTimeout(() => {
+    completionTimer.current = window.setTimeout(() => {
+      if (workRef.current !== w) return;
       net.completeTaskStep(w.taskId);
+      soundEngine.playTaskComplete();
+      stopWork(false);
     }, wait);
-    stopWork(false);
   }, [stopWork]);
 
-  // Meetings, game over or leaving the station cancel any task in progress.
+  useEffect(() => () => {
+    if (completionTimer.current !== null) window.clearTimeout(completionTimer.current);
+    if (workRef.current) net.cancelTask();
+  }, []);
+
+  // Meetings, game over, or death interrupt the current station session.
   useEffect(() => {
-    if (work && snapshot && snapshot.state !== GAME_STATES.PLAYING) stopWork(false);
+    if (work && snapshot && (snapshot.state !== GAME_STATES.PLAYING
+      || (work.startedAlive && !snapshot.players[socketId]?.isAlive))) stopWork(false);
     if (snapshot && snapshot.state !== GAME_STATES.PLAYING) sceneRef.current?.clearInput();
-  }, [snapshot, work, stopWork]);
+  }, [snapshot, work, stopWork, socketId]);
 
   const you = snapshot?.you;
   const me = snapshot?.players[socketId];
@@ -138,6 +152,7 @@ export const GameView: React.FC<GameViewProps> = ({ settings, onLeave }) => {
     if (!sceneRef.current) return;
     const next = sceneRef.current.toggleSecurityCameras();
     setIsViewingCameras(next);
+    if (!next) setCameraMode(sceneRef.current.cameraController.mode);
   }, []);
 
   const handleSelectCameraFeed = useCallback((idx: number) => {
@@ -149,6 +164,7 @@ export const GameView: React.FC<GameViewProps> = ({ settings, onLeave }) => {
   useEffect(() => {
     if (isViewingCameras && snapshot && (snapshot.state !== GAME_STATES.PLAYING || snapshot.sabotage?.commsDisabled)) {
       sceneRef.current?.toggleSecurityCameras(false);
+      if (sceneRef.current) setCameraMode(sceneRef.current.cameraController.mode);
       setIsViewingCameras(false);
     }
     if (activeSabotageGame && snapshot && (snapshot.state !== GAME_STATES.PLAYING
@@ -176,7 +192,7 @@ export const GameView: React.FC<GameViewProps> = ({ settings, onLeave }) => {
 
   // ---- Actions ----
   const doUse = useCallback(() => {
-    if (!playing || !you || you.ventId) return;
+    if (!playing || !you || you.ventId || workRef.current) return;
     if (ctx.sabotagePartId && ctx.sabotageType) {
       handleRepairSabotage();
       return;
@@ -189,19 +205,25 @@ export const GameView: React.FC<GameViewProps> = ({ settings, onLeave }) => {
       handleToggleSecurityCameras();
       return;
     }
-    if (ctx.taskId && !workRef.current) {
+    if (ctx.taskId) {
       net.useTask(ctx.taskId);
-      setWork({
+      const nextWork: WorkState = {
         taskId: ctx.taskId,
         name: ctx.taskName || 'Task',
         hold: ctx.taskHold,
         step: ctx.taskStep,
         totalSteps: ctx.taskTotalSteps,
         startedAt: performance.now(),
-      });
-      if (sceneRef.current) sceneRef.current.movementLocked = true;
+        startedAlive: !!me?.isAlive,
+      };
+      workRef.current = nextWork;
+      setWork(nextWork);
+      if (sceneRef.current) {
+        sceneRef.current.clearInput();
+        sceneRef.current.movementLocked = true;
+      }
     }
-  }, [playing, you, ctx, handleRepairSabotage, handleToggleSecurityCameras]);
+  }, [playing, you, me?.isAlive, ctx, handleRepairSabotage, handleToggleSecurityCameras]);
 
   const doReport = useCallback(() => {
     if (playing && ctx.reportBodyId) net.reportBody(ctx.reportBodyId);
@@ -237,8 +259,15 @@ export const GameView: React.FC<GameViewProps> = ({ settings, onLeave }) => {
   }, []);
 
   const handleToggleCamera = useCallback(() => {
-    if (sceneRef.current) setCameraMode(sceneRef.current.cameraController.toggleViewMode());
-  }, []);
+    const scene = sceneRef.current;
+    if (!scene || workRef.current || activeSabotageGame) return;
+    scene.clearInput();
+    if (scene.isViewingCameras) {
+      handleToggleSecurityCameras();
+      return;
+    }
+    setCameraMode(scene.cameraController.toggleViewMode());
+  }, [activeSabotageGame, handleToggleSecurityCameras]);
 
   // ---- Keyboard shortcuts ----
   useEffect(() => {
@@ -246,6 +275,7 @@ export const GameView: React.FC<GameViewProps> = ({ settings, onLeave }) => {
       const el = e.target as HTMLElement | null;
       if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) return;
       if (e.repeat) return;
+      if (workRef.current) return;
 
       // In CCTV surveillance camera view
       if (isViewingCameras) {

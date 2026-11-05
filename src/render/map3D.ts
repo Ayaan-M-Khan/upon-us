@@ -26,6 +26,7 @@ export class Map3D {
   private animatedProps: Array<(delta: number, elapsed: number) => void> = [];
   private elapsed: number = 0;
   private doors = new Map<THREE.Mesh, string>();
+  private lockedRooms = new Set<string>();
 
   // Fog of war room shrouds (conceal rooms from outside)
   private roomShrouds: Map<string, {
@@ -44,6 +45,7 @@ export class Map3D {
 
     this.buildFloors();
     this.buildCorridors();
+    this.buildRouteLights();
     this.buildWalls();
     this.buildDoors();
     this.buildOuterHull();
@@ -63,24 +65,24 @@ export class Map3D {
     const ctx = canvas.getContext('2d');
     if (ctx) {
       // Base floor color
-      ctx.fillStyle = baseColorHex;
+      ctx.fillStyle = '#' + new THREE.Color(baseColorHex).lerp(new THREE.Color('#243247'), 0.58).getHexString();
       ctx.fillRect(0, 0, 256, 256);
 
       // Sci-fi 4-quadrant deck panels
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
-      ctx.lineWidth = 3;
+      ctx.strokeStyle = 'rgba(194, 218, 240, 0.055)';
+      ctx.lineWidth = 1;
       ctx.strokeRect(4, 4, 120, 120);
       ctx.strokeRect(132, 4, 120, 120);
       ctx.strokeRect(4, 132, 120, 120);
       ctx.strokeRect(132, 132, 120, 120);
 
       // Outer seam border
-      ctx.strokeStyle = 'rgba(0, 0, 0, 0.4)';
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.18)';
       ctx.lineWidth = 4;
       ctx.strokeRect(2, 2, 252, 252);
 
       // Corner rivets
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.22)';
       const rivets = [
         [10, 10], [118, 10], [10, 118], [118, 118],
         [138, 10], [246, 10], [138, 118], [246, 118],
@@ -94,7 +96,7 @@ export class Map3D {
       // Room-specific tactical deck markings
       if (roomName === 'Storage') {
         // Yellow & Black hazard caution chevrons
-        ctx.fillStyle = 'rgba(245, 158, 11, 0.25)';
+        ctx.fillStyle = 'rgba(245, 158, 11, 0.08)';
         for (let i = -100; i < 356; i += 40) {
           ctx.beginPath();
           ctx.moveTo(i, 0);
@@ -106,19 +108,19 @@ export class Map3D {
         }
       } else if (roomName === 'Medbay') {
         // Turquoise medical cross
-        ctx.fillStyle = 'rgba(45, 212, 191, 0.2)';
+        ctx.fillStyle = 'rgba(45, 212, 191, 0.08)';
         ctx.fillRect(116, 80, 24, 96);
         ctx.fillRect(80, 116, 96, 24);
       } else if (roomName === 'Reactor') {
         // Radiation trefoil / hazard ring
-        ctx.strokeStyle = 'rgba(239, 68, 68, 0.25)';
+        ctx.strokeStyle = 'rgba(239, 68, 68, 0.08)';
         ctx.lineWidth = 6;
         ctx.beginPath();
         ctx.arc(128, 128, 64, 0, Math.PI * 2);
         ctx.stroke();
       } else if (roomName === 'Weapons') {
         // Tactical crosshair circle
-        ctx.strokeStyle = 'rgba(251, 146, 60, 0.25)';
+        ctx.strokeStyle = 'rgba(251, 146, 60, 0.08)';
         ctx.lineWidth = 4;
         ctx.beginPath();
         ctx.arc(128, 128, 70, 0, Math.PI * 2);
@@ -129,7 +131,7 @@ export class Map3D {
         ctx.stroke();
       } else if (roomName === 'Shields') {
         // Hexagonal energy node conduits
-        ctx.strokeStyle = 'rgba(56, 189, 248, 0.25)';
+        ctx.strokeStyle = 'rgba(56, 189, 248, 0.08)';
         ctx.lineWidth = 5;
         ctx.beginPath();
         for (let a = 0; a < 6; a++) {
@@ -159,6 +161,7 @@ export class Map3D {
       const door = new THREE.Mesh(new THREE.BoxGeometry(length, 2.3, 0.28), material);
       door.position.set((wall.x1 + wall.x2) / 2, 1.15, (wall.z1 + wall.z2) / 2);
       door.rotation.y = -Math.atan2(wall.z2 - wall.z1, wall.x2 - wall.x1);
+      door.position.y = -1.3;
       door.visible = false;
       this.group.add(door);
       this.doors.set(door, roomId);
@@ -166,7 +169,7 @@ export class Map3D {
   }
 
   public setDoorLocks(lockedRooms: string[]): void {
-    for (const [door, roomId] of this.doors) door.visible = lockedRooms.includes(roomId);
+    this.lockedRooms = new Set(lockedRooms);
   }
 
   private buildFloors(): void {
@@ -183,8 +186,8 @@ export class Map3D {
 
         const floorMat = new THREE.MeshStandardMaterial({
           map: floorTex,
-          roughness: 0.45,
-          metalness: 0.35,
+          roughness: 0.78,
+          metalness: 0.12,
         });
 
         // The second rectangle of a chamfered room sits a hair lower to avoid z-fighting
@@ -193,6 +196,7 @@ export class Map3D {
         floorMesh.receiveShadow = true;
         floorGroup.add(floorMesh);
       });
+      floorTexBase.dispose();
 
       const sign = document.createElement('canvas');
       sign.width = 512;
@@ -242,7 +246,7 @@ export class Map3D {
     const runnerMat = new THREE.MeshBasicMaterial({
       color: 0x0284c7,
       transparent: true,
-      opacity: 0.8,
+      opacity: 0.3,
     });
 
     for (const corr of MAP_CORRIDORS) {
@@ -270,6 +274,37 @@ export class Map3D {
     }
 
     this.group.add(corridorGroup);
+  }
+
+  private buildRouteLights(): void {
+    const geometry = new THREE.PlaneGeometry(0.26, 0.12);
+    const material = new THREE.MeshBasicMaterial({ color: 0x7dd3fc, transparent: true, opacity: 0.55 });
+    for (const corridor of MAP_CORRIDORS) {
+      const b = corridor.bounds;
+      const horizontal = b.maxX - b.minX >= b.maxZ - b.minZ;
+      const length = horizontal ? b.maxX - b.minX : b.maxZ - b.minZ;
+      const count = Math.max(1, Math.floor(length / 2.4));
+      const markers = new THREE.InstancedMesh(geometry, material, count * 2);
+      const transform = new THREE.Object3D();
+      transform.rotation.x = -Math.PI / 2;
+      transform.rotation.z = horizontal ? 0 : Math.PI / 2;
+      for (let i = 0; i < count; i++) {
+        const t = (i + 0.5) / count;
+        for (let side = 0; side < 2; side++) {
+          transform.position.set(
+            horizontal ? THREE.MathUtils.lerp(b.minX, b.maxX, t) : (side ? b.maxX - 0.5 : b.minX + 0.5),
+            0.012,
+            horizontal ? (side ? b.maxZ - 0.5 : b.minZ + 0.5) : THREE.MathUtils.lerp(b.minZ, b.maxZ, t),
+          );
+          transform.updateMatrix();
+          markers.setMatrixAt(i * 2 + side, transform.matrix);
+        }
+      }
+      this.group.add(markers);
+    }
+    this.animatedProps.push((_delta, time) => {
+      material.opacity = 0.46 + Math.sin(time * 1.5) * 0.09;
+    });
   }
 
   private buildWalls(): void {
@@ -1203,11 +1238,26 @@ export class Map3D {
     this.group.add(propGroup);
   }
 
+  private createParticleTexture(): THREE.CanvasTexture {
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = 64;
+    const ctx = canvas.getContext('2d')!;
+    const glow = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+    glow.addColorStop(0, 'rgba(255,255,255,1)');
+    glow.addColorStop(0.15, 'rgba(255,255,255,0.8)');
+    glow.addColorStop(0.5, 'rgba(255,255,255,0.12)');
+    glow.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, 0, 64, 64);
+    return new THREE.CanvasTexture(canvas);
+  }
+
   private buildOuterSpace(): void {
     const spaceGroup = new THREE.Group();
+    const particleTexture = this.createParticleTexture();
 
     // 1. Deep Space Starfield with multi-colored stars
-    const starCount = 2400;
+    const starCount = 1800;
     const positions = new Float32Array(starCount * 3);
     const colors = new Float32Array(starCount * 3);
 
@@ -1239,7 +1289,9 @@ export class Map3D {
     starGeo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 
     const starMat = new THREE.PointsMaterial({
-      size: 0.75,
+      map: particleTexture,
+      depthWrite: false,
+      size: 0.65,
       vertexColors: true,
       transparent: true,
       opacity: 0.85,
@@ -1277,16 +1329,33 @@ export class Map3D {
     nebGeo.setAttribute('color', new THREE.BufferAttribute(nebColors, 3));
 
     const nebMat = new THREE.PointsMaterial({
-      size: 4.5,
+      map: particleTexture,
+      depthWrite: false,
+      size: 15,
       vertexColors: true,
       transparent: true,
-      opacity: 0.45,
+      opacity: 0.12,
       fog: false,
       blending: THREE.AdditiveBlending,
     });
 
     const nebula = new THREE.Points(nebGeo, nebMat);
     spaceGroup.add(nebula);
+    this.animatedProps.push((_delta, time) => {
+      nebula.rotation.y = Math.sin(time * 0.025) * 0.035;
+      starMat.opacity = 0.76 + Math.sin(time * 0.7) * 0.05;
+    });
+
+    const backdrop = new THREE.Mesh(
+      new THREE.PlaneGeometry(600, 500),
+      new THREE.MeshBasicMaterial({
+        map: particleTexture, color: 0x1a3672, transparent: true,
+        opacity: 0.28, depthWrite: false, fog: false,
+      }),
+    );
+    backdrop.rotation.x = -Math.PI / 2;
+    backdrop.position.set(30, -60, -15);
+    spaceGroup.add(backdrop);
 
     // 3. Giant Distant Ringed Gas Giant Planet visible in the viewport background
     const planetGroup = new THREE.Group();
@@ -1296,6 +1365,7 @@ export class Map3D {
       new THREE.SphereGeometry(18, 32, 32),
       new THREE.MeshStandardMaterial({
         color: 0x4c1d95,
+        fog: false,
         roughness: 0.8,
         emissive: 0x2e1065,
         emissiveIntensity: 0.3,
@@ -1308,6 +1378,7 @@ export class Map3D {
       new THREE.RingGeometry(24, 38, 32),
       new THREE.MeshBasicMaterial({
         color: 0x818cf8,
+        fog: false,
         side: THREE.DoubleSide,
         transparent: true,
         opacity: 0.5,
@@ -1317,6 +1388,27 @@ export class Map3D {
     ringMesh.rotation.y = Math.PI / 6;
     planetGroup.add(ringMesh);
 
+    const atmosphere = new THREE.Mesh(
+      new THREE.SphereGeometry(19.2, 32, 24),
+      new THREE.ShaderMaterial({
+        transparent: true, depthWrite: false, side: THREE.BackSide,
+        blending: THREE.AdditiveBlending,
+        vertexShader: `varying vec3 vNormal; varying vec3 vView;
+          void main() {
+            vec4 p = modelViewMatrix * vec4(position, 1.0);
+            vNormal = normalize(normalMatrix * normal);
+            vView = normalize(-p.xyz);
+            gl_Position = projectionMatrix * p;
+          }`,
+        fragmentShader: `varying vec3 vNormal; varying vec3 vView;
+          void main() {
+            float rim = pow(1.0 - abs(dot(normalize(vNormal), normalize(vView))), 3.0);
+            gl_FragColor = vec4(0.24, 0.5, 0.95, rim * 0.5);
+          }`,
+      }),
+    );
+    planetGroup.add(atmosphere);
+    this.animatedProps.push((_delta, time) => { planetMesh.rotation.y = time * 0.025; });
     spaceGroup.add(planetGroup);
 
     // 4. Subtle Cosmic Dust / Micro-Meteorites drifting past the ship hull
@@ -1324,7 +1416,7 @@ export class Map3D {
     const dustPositions = new Float32Array(dustCount * 3);
     for (let i = 0; i < dustCount * 3; i += 3) {
       dustPositions[i] = (Math.random() - 0.5) * 140;
-      dustPositions[i + 1] = Math.random() * 20 - 5;
+      dustPositions[i + 1] = -8 - Math.random() * 22;
       dustPositions[i + 2] = (Math.random() - 0.5) * 100;
     }
 
@@ -1332,9 +1424,11 @@ export class Map3D {
     dustGeo.setAttribute('position', new THREE.BufferAttribute(dustPositions, 3));
     const dustMat = new THREE.PointsMaterial({
       color: 0x38bdf8,
-      size: 0.4,
+      map: particleTexture,
+      depthWrite: false,
+      size: 0.22,
       transparent: true,
-      opacity: 0.6,
+      opacity: 0.25,
       blending: THREE.AdditiveBlending,
     });
 
@@ -1848,8 +1942,42 @@ export class Map3D {
     }
   }
 
+  public dispose(): void {
+    const geometries = new Set<THREE.BufferGeometry>();
+    const materials = new Set<THREE.Material>();
+    const textures = new Set<THREE.Texture>();
+    this.group.traverse((object) => {
+      if (object instanceof THREE.Mesh || object instanceof THREE.Points) {
+        geometries.add(object.geometry);
+        for (const material of [object.material].flat()) {
+          materials.add(material);
+          if ('map' in material && material.map instanceof THREE.Texture) textures.add(material.map);
+        }
+      }
+      if (object instanceof THREE.InstancedMesh) object.dispose();
+    });
+    for (const texture of textures) texture.dispose();
+    for (const material of materials) material.dispose();
+    for (const geometry of geometries) geometry.dispose();
+    this.group.removeFromParent();
+    this.group.clear();
+    this.animatedProps = [];
+    this.doors.clear();
+    this.lockedRooms.clear();
+    this.roomShrouds.clear();
+    this.roomLights = [];
+    this.wallCameraLeds = [];
+    this.starParticles = null;
+    this.dustParticles = null;
+  }
+
   public update(delta: number): void {
     this.elapsed += delta;
+    for (const [door, roomId] of this.doors) {
+      const targetY = this.lockedRooms.has(roomId) ? 1.15 : -1.3;
+      door.position.y = THREE.MathUtils.damp(door.position.y, targetY, 24, delta);
+      door.visible = door.position.y > -1.28;
+    }
 
     if (this.starParticles) {
       this.starParticles.rotation.y += delta * 0.003;

@@ -124,6 +124,9 @@ export class GameScene {
   private remotePosSeq: Map<string, number> = new Map();
   private taskMarkerGroup = new THREE.Group();
   private taskMarkerKey = '';
+  private taskPulseGroup = new THREE.Group();
+  private taskPulseGeometry = new THREE.RingGeometry(0.5, 0.56, 32);
+  private taskPulses: Array<{ mesh: THREE.Mesh<THREE.RingGeometry, THREE.MeshBasicMaterial>; age: number }> = [];
   private waypointGroup = new THREE.Group();
   private waypointRing: THREE.Mesh;
   private waypointTime = 0;
@@ -161,6 +164,7 @@ export class GameScene {
 
   // Security CCTV Surveillance System
   public isViewingCameras = false;
+  private cameraModeBeforeCctv: 'third_person' | 'first_person' = 'third_person';
   private visibilityWalls = MAP_WALLS;
   public activeCameraIndex = 0;
 
@@ -168,6 +172,10 @@ export class GameScene {
 
   public toggleSecurityCameras(enable?: boolean): boolean {
     const next = enable !== undefined ? enable : !this.isViewingCameras;
+    if (next === this.isViewingCameras) return next;
+    if (next) {
+      this.cameraModeBeforeCctv = this.cameraController.mode === 'first_person' ? 'first_person' : 'third_person';
+    }
     this.isViewingCameras = next;
     this.movementLocked = next;
 
@@ -176,7 +184,7 @@ export class GameScene {
       this.cameraController.mode = 'cctv';
       this.cameraController.cctvCamera = SECURITY_CAMERAS[this.activeCameraIndex] || SECURITY_CAMERAS[0];
     } else {
-      this.cameraController.mode = 'third_person';
+      this.cameraController.mode = this.cameraModeBeforeCctv;
       this.cameraController.cctvCamera = null;
     }
     return this.isViewingCameras;
@@ -252,6 +260,7 @@ export class GameScene {
     this.map3D = new Map3D();
     this.scene.add(this.map3D.group);
     this.scene.add(this.taskMarkerGroup);
+    this.scene.add(this.taskPulseGroup);
     this.scene.add(this.waypointGroup);
     this.waypointRing = new THREE.Mesh(
       new THREE.TorusGeometry(0.9, 0.1, 8, 24),
@@ -477,6 +486,22 @@ export class GameScene {
     if (key === this.taskMarkerKey) return;
     this.taskMarkerKey = key;
 
+    // A confirmed task step sends a short pulse from the station that was used.
+    if (snapshot.state === GAME_STATES.PLAYING) {
+      for (const marker of this.activeTaskMarkers) {
+        const current = snapshot.you?.tasks.find((task) => task.taskId === marker.task.taskId);
+        if (!current || (!current.done && current.step === marker.task.step)) continue;
+        const material = new THREE.MeshBasicMaterial({
+          color: 0x6ee7b7, transparent: true, opacity: 0.8, depthWrite: false, side: THREE.DoubleSide,
+        });
+        const pulse = new THREE.Mesh(this.taskPulseGeometry, material);
+        pulse.rotation.x = -Math.PI / 2;
+        pulse.position.set(marker.task.x, 0.04, marker.task.z);
+        this.taskPulseGroup.add(pulse);
+        this.taskPulses.push({ mesh: pulse, age: 0 });
+      }
+    }
+
     // Dispose old markers
     for (const marker of this.activeTaskMarkers) {
       this.taskMarkerGroup.remove(marker.group);
@@ -498,10 +523,10 @@ export class GameScene {
     this.activeTaskMarkers = [];
 
     // Shared geometries and materials for performance
-    const beaconGeo = new THREE.CylinderGeometry(0.48, 0.48, 2.8, 16);
+    const beaconGeo = new THREE.CylinderGeometry(0.2, 0.38, 1.4, 16);
     const stemGeo = new THREE.CylinderGeometry(0.07, 0.12, 0.46, 16);
     const dotGeo = new THREE.SphereGeometry(0.07, 12, 12);
-    const ringGeo = new THREE.TorusGeometry(0.72, 0.05, 8, 24);
+    const ringGeo = new THREE.TorusGeometry(0.58, 0.025, 8, 32);
 
     for (const t of tasks) {
       const group = new THREE.Group();
@@ -517,7 +542,7 @@ export class GameScene {
         depthWrite: false,
       });
       const beaconMesh = new THREE.Mesh(beaconGeo, beaconMat);
-      beaconMesh.position.y = 1.4;
+      beaconMesh.position.y = 0.7;
       group.add(beaconMesh);
 
       // 1. Ground Torus Ring
@@ -533,7 +558,7 @@ export class GameScene {
 
       // 2. Floating Animated '!' Exclamation Mark Icon
       const iconGroup = new THREE.Group();
-      iconGroup.position.y = 1.95;
+      iconGroup.position.y = 1.5;
 
       const markMat = new THREE.MeshStandardMaterial({
         color: 0xfacc15,
@@ -1271,11 +1296,7 @@ export class GameScene {
 
       const isFP = this.cameraController.mode === 'first_person';
       const hidden = isFP || inVent;
-      localModel.bodyMesh.visible = !hidden;
-      localModel.visorMesh.visible = !hidden;
-      localModel.visorFrameMesh.visible = !hidden;
-      localModel.backpackMesh.visible = !hidden;
-      localModel.hatGroup.visible = !hidden;
+      localModel.group.visible = !hidden;
       this.applyGhostLook(this.localPlayerId, localModel, !meAlive);
     }
 
@@ -1400,11 +1421,22 @@ export class GameScene {
 
     // 6. Active Task 3D Indicators (Animated Icon bobbing/spinning, proximity billboard)
     this.taskAnimTime += delta;
+    for (let i = this.taskPulses.length - 1; i >= 0; i--) {
+      const pulse = this.taskPulses[i];
+      pulse.age += delta;
+      pulse.mesh.scale.setScalar(1 + pulse.age * 2.5);
+      pulse.mesh.material.opacity = Math.max(0, 0.8 * (1 - pulse.age / 0.8));
+      if (pulse.age >= 0.8) {
+        pulse.mesh.removeFromParent();
+        pulse.mesh.material.dispose();
+        this.taskPulses.splice(i, 1);
+      }
+    }
 
     // Animate Yellow Task Markers
     for (const marker of this.activeTaskMarkers) {
-      marker.iconGroup.rotation.y += delta * 2.2;
-      marker.iconGroup.position.y = 1.95 + Math.sin(this.taskAnimTime * 3.5 + marker.task.x) * 0.12;
+      marker.iconGroup.rotation.y += delta * 0.7;
+      marker.iconGroup.position.y = 1.5 + Math.sin(this.taskAnimTime * 2 + marker.task.x) * 0.06;
 
       const d = Math.hypot(this.localPos.x - marker.task.x, this.localPos.z - marker.task.z);
       const isNearby = d <= TASK_RANGE;
@@ -1414,7 +1446,7 @@ export class GameScene {
       const beaconMat = marker.beaconMesh.material as THREE.MeshBasicMaterial;
       const pulse = 1.0 + Math.sin(this.taskAnimTime * 4.0) * 0.12;
       marker.beaconMesh.scale.set(pulse, 1, pulse);
-      beaconMat.opacity = 0.22 + Math.sin(this.taskAnimTime * 3.0) * 0.1;
+      beaconMat.opacity = 0.12 + Math.sin(this.taskAnimTime * 2) * 0.035;
 
       if (isNearby) {
         marker.billboardMesh.quaternion.copy(this.camera.quaternion);
@@ -1509,6 +1541,11 @@ export class GameScene {
     document.removeEventListener('visibilitychange', this.onVisibility);
     window.removeEventListener('resize', this.onResize);
     this.cameraController.dispose();
+    this.map3D.dispose();
+    this.taskPulseGeometry.dispose();
+    for (const pulse of this.taskPulses) pulse.mesh.material.dispose();
+    this.taskPulseGroup.clear();
+    this.taskPulses = [];
     this.waypointRing.geometry.dispose();
     (this.waypointRing.material as THREE.Material).dispose();
     const waypointBeam = this.waypointGroup.children[1] as THREE.Mesh;
