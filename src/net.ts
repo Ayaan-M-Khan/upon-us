@@ -172,9 +172,33 @@ class NetworkManager {
   public sabotage(type: SabotageType, room?: string): void {
     this.socket?.emit(EVENTS.SABOTAGE, { type, room });
   }
-  public fixSabotage(partId?: number): void {
-    this.socket?.emit(EVENTS.FIX_SABOTAGE, { partId });
+  public fixSabotage(partId?: number, instant?: boolean): void {
+    this.socket?.emit(EVENTS.FIX_SABOTAGE, { partId, instant });
   }
+
+  // ---- Role abilities ----
+  public poison(targetId: string): void {
+    this.socket?.emit(EVENTS.POISON_ATTEMPT, { targetId });
+  }
+  public shapeshift(targetId: string): void {
+    this.socket?.emit(EVENTS.SHAPESHIFT, { targetId });
+  }
+  public unshift(): void {
+    this.socket?.emit(EVENTS.UNSHIFT);
+  }
+  public dissolveBody(bodyId: string): void {
+    this.socket?.emit(EVENTS.DISSOLVE_BODY, { bodyId });
+  }
+  public investigate(targetId: string): void {
+    this.socket?.emit(EVENTS.INVESTIGATE_PLAYER, { targetId });
+  }
+  public doctorProtect(targetId: string): void {
+    this.socket?.emit(EVENTS.DOCTOR_PROTECT, { targetId });
+  }
+  public ghostProtect(targetId: string): void {
+    this.socket?.emit(EVENTS.GHOST_PROTECT, { targetId });
+  }
+
   public onChat(cb: (m: ChatMessage) => void): () => void {
     this.chatListeners.add(cb);
     return () => this.chatListeners.delete(cb);
@@ -218,6 +242,27 @@ class NetworkManager {
   public onPlayerKilled(cb: PlayerKilledListener): () => void {
     this.playerKilledListeners.add(cb);
     return () => this.playerKilledListeners.delete(cb);
+  }
+
+  public onRoleEffectTriggered(cb: (payload: any) => void): () => void {
+    this.socket?.on(EVENTS.ROLE_EFFECT_TRIGGERED, cb);
+    return () => {
+      this.socket?.off(EVENTS.ROLE_EFFECT_TRIGGERED, cb);
+    };
+  }
+
+  public onInvestigationResult(cb: (result: any) => void): () => void {
+    this.socket?.on(EVENTS.INVESTIGATION_RESULT, cb);
+    return () => {
+      this.socket?.off(EVENTS.INVESTIGATION_RESULT, cb);
+    };
+  }
+
+  public onBodyDissolved(cb: (data: { bodyId: string }) => void): () => void {
+    this.socket?.on(EVENTS.BODY_DISSOLVED, cb);
+    return () => {
+      this.socket?.off(EVENTS.BODY_DISSOLVED, cb);
+    };
   }
 }
 
