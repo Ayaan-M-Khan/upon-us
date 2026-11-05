@@ -48,6 +48,7 @@ export const RoleReveal: React.FC<{ snapshot: GameStateSnapshot }> = ({ snapshot
   const you = snapshot.you;
   if (!you) return null;
   const impostor = you.role === 'impostor';
+  const engineer = you.role === 'engineer';
   const crewCount = Object.keys(snapshot.players).length;
   const lineup = impostor
     ? [snapshot.players[net.getSocketId() || '']?.colorId, ...you.teammates.map((t) => t.colorId)].filter(Boolean)
@@ -55,15 +56,17 @@ export const RoleReveal: React.FC<{ snapshot: GameStateSnapshot }> = ({ snapshot
 
   return (
     <div className="fixed inset-0 z-40 flex flex-col items-center justify-center bg-black pointer-events-auto">
-      <div className={`text-6xl sm:text-7xl font-black tracking-widest ${impostor ? 'text-red-500' : 'text-cyan-300'}`}>
-        {impostor ? 'IMPOSTOR' : 'CREWMATE'}
+      <div className={`text-6xl sm:text-7xl font-black tracking-widest ${impostor ? 'text-red-500' : engineer ? 'text-amber-300' : 'text-cyan-300'}`}>
+        {impostor ? 'IMPOSTOR' : engineer ? 'ENGINEER' : 'CREWMATE'}
       </div>
       <div className="mt-3 text-slate-300 font-bold text-lg">
         {impostor
           ? you.teammates.length > 0
             ? `Your partner${you.teammates.length > 1 ? 's' : ''}: ${you.teammates.map((t) => t.name).join(', ')}`
             : 'Kill the crew without being caught'
-          : `Finish your tasks. ${crewCount} players aboard, and not everyone is who they seem.`}
+          : engineer
+            ? `Finish your tasks. Vent for 6 seconds at a time; access recharges 20 seconds after exiting.`
+            : `Finish your tasks. ${crewCount} players aboard, and not everyone is who they seem.`}
       </div>
       <div className="mt-8 flex space-x-2">
         {lineup.map((c, i) => (

@@ -58,8 +58,7 @@ export const EVENTS = {
   VOICE_STATE_RELAY: 'voiceStateRelay',
 } as const;
 
-export type Role = 'crewmate' | 'impostor';
-
+export type Role = 'crewmate' | 'impostor' | 'engineer';
 export interface LobbyPlayer {
   id: string; // Socket ID
   name: string;
@@ -176,6 +175,9 @@ export interface YouView {
   killCooldownMs: number;
   emergencyLeft: number;
   emergencyCooldownMs: number;
+  engineerVentCooldownMs: number;
+  engineerVentTimeLeftMs: number;
+  sabotageCooldownMs: number;
   ventId: string | null;
   ventLinks: { id: string; x: number; z: number }[];
   sabotageCooldownSecs?: number;

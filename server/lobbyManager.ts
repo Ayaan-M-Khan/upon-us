@@ -19,6 +19,13 @@ import {
 import { EVENTS, LobbyData, LobbyPlayer } from '../shared/events';
 import { GameRoom } from './game/GameRoom';
 
+const clampNumber = (value: unknown, fallback: number, min: number, max: number, integer = false): number => {
+  const parsed = Number(value);
+  const valid = Number.isFinite(parsed) ? parsed : fallback;
+  const bounded = Math.max(min, Math.min(max, valid));
+  return integer ? Math.round(bounded) : bounded;
+};
+
 export class Lobby {
   public code: string;
   public hostId: string;
@@ -219,18 +226,18 @@ export class LobbyManager {
 
     // Validate settings values
     const s = { ...lobby.settings, ...partialSettings };
-    s.impostorCount = Math.max(1, Math.min(3, Math.round(s.impostorCount || 1)));
-    s.playerSpeed = Math.max(0.5, Math.min(3.0, Number(s.playerSpeed) || 1.0));
-    s.crewmateVision = Math.max(0.25, Math.min(5.0, Number(s.crewmateVision) || 1.0));
-    s.impostorVision = Math.max(0.25, Math.min(5.0, Number(s.impostorVision) || 1.5));
-    s.killCooldown = Math.max(10, Math.min(60, Number(s.killCooldown) || 25));
-    s.commonTasks = Math.max(0, Math.min(2, Math.round(s.commonTasks || 1)));
-    s.shortTasks = Math.max(0, Math.min(5, Math.round(s.shortTasks || 2)));
-    s.longTasks = Math.max(0, Math.min(3, Math.round(s.longTasks || 1)));
-    s.emergencyMeetings = Math.max(0, Math.min(9, Math.round(s.emergencyMeetings || 1)));
-    s.emergencyCooldown = Math.max(0, Math.min(60, Math.round(s.emergencyCooldown || 15)));
-    s.discussionTime = Math.max(0, Math.min(120, Math.round(s.discussionTime || 15)));
-    s.votingTime = Math.max(15, Math.min(300, Math.round(s.votingTime || 120)));
+    s.impostorCount = clampNumber(s.impostorCount, 1, 1, 3, true);
+    s.playerSpeed = clampNumber(s.playerSpeed, 1, 0.5, 3);
+    s.crewmateVision = clampNumber(s.crewmateVision, 1, 0.25, 5);
+    s.impostorVision = clampNumber(s.impostorVision, 1.5, 0.25, 5);
+    s.killCooldown = clampNumber(s.killCooldown, 25, 10, 60);
+    s.commonTasks = clampNumber(s.commonTasks, 1, 0, 2, true);
+    s.shortTasks = clampNumber(s.shortTasks, 2, 0, 5, true);
+    s.longTasks = clampNumber(s.longTasks, 1, 0, 3, true);
+    s.emergencyMeetings = clampNumber(s.emergencyMeetings, 1, 0, 9, true);
+    s.emergencyCooldown = clampNumber(s.emergencyCooldown, 15, 0, 60, true);
+    s.discussionTime = clampNumber(s.discussionTime, 15, 0, 120, true);
+    s.votingTime = clampNumber(s.votingTime, 120, 15, 300, true);
     s.fillWithBots = s.fillWithBots !== false;
 
     lobby.settings = s;

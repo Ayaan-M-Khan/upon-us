@@ -29,9 +29,11 @@ export function assignRoles(playerIds: string[], impostorCount: number): Map<str
 
   const actual = Math.max(1, Math.min(impostorCount, maxImpostorsFor(playerIds.length)));
   const impostorIds = new Set(shuffled.slice(0, actual));
+  const engineerId = playerIds.length >= 5 ? shuffled.find((id) => !impostorIds.has(id)) : undefined;
 
   for (const id of playerIds) {
-    assignments.set(id, { playerId: id, role: impostorIds.has(id) ? 'impostor' : 'crewmate', isAlive: true });
+    const role = impostorIds.has(id) ? 'impostor' : id === engineerId ? 'engineer' : 'crewmate';
+    assignments.set(id, { playerId: id, role, isAlive: true });
   }
   return assignments;
 }
