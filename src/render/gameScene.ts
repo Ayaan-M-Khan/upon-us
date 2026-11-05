@@ -561,7 +561,7 @@ export class GameScene {
       const billboardMat = new THREE.MeshBasicMaterial({
         map: promptTex,
         transparent: true,
-        depthTest: false,
+        depthWrite: false,
       });
       const billboardMesh = new THREE.Mesh(billboardGeo, billboardMat);
       billboardMesh.position.y = 2.45;
@@ -1351,7 +1351,6 @@ export class GameScene {
     this.keyLight.intensity = THREE.MathUtils.damp(this.keyLight.intensity, lightsOut ? 0.22 : 1.2, 4, delta);
     this.keyLight.position.set(this.localPos.x + 15, 30, this.localPos.z - 10);
     this.keyLight.target.position.set(this.localPos.x, 0, this.localPos.z);
-    this.taskMarkerGroup.rotation.y += delta * 0.8;
     if (this.waypointGroup.visible) {
       this.waypointTime += delta;
       this.waypointRing.scale.setScalar(1 + Math.sin(this.waypointTime * 4) * 0.14);
