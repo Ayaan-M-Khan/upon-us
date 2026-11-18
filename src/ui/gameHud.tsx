@@ -82,6 +82,7 @@ const ActionButton: React.FC<{
     <button
       disabled={!enabled}
       title={title}
+      aria-label={[label, badge ? `(${badge})` : '', hint ? `shortcut ${hint.replace(/[[\]]/g, '')}` : ''].filter(Boolean).join(' ')}
       onClick={() => {
         soundEngine.playClick();
         onClick();
@@ -379,6 +380,7 @@ export const GameHud: React.FC<GameHudProps> = ({
   const alive = snapshot?.players[(net.getSocketId() || '')]?.isAlive ?? true;
   const inVent = !!you?.ventId;
   const killReady = !!you && you.killCooldownMs <= 0;
+  const progressHidden = !!snapshot && snapshot.taskProgress === undefined; // lobby set Task Bar Updates: Never
   const progress = Math.round((snapshot?.taskProgress || 0) * 100);
   const coarse = typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches;
   const [showSettings, setShowSettings] = useState(false);
@@ -438,10 +440,10 @@ export const GameHud: React.FC<GameHudProps> = ({
         <div className="hud-task-panel pointer-events-auto">
           <div className="flight-panel px-3 py-2.5">
             <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-[0.16em] mb-2 text-slate-400">
-              <span>Crew progress</span><span className="text-emerald-300 tabular-nums">{commsJammed ? 'OFFLINE' : progress + '%'}</span>
+              <span>Crew progress</span><span className="text-emerald-300 tabular-nums">{commsJammed ? 'OFFLINE' : progressHidden ? 'HIDDEN' : progress + '%'}</span>
             </div>
-            <div className="h-1.5 rounded-full bg-slate-700/60 overflow-hidden" role="progressbar" aria-label="Crew task progress" aria-valuenow={commsJammed ? undefined : progress} aria-valuemin={0} aria-valuemax={100}>
-              <div className="h-full rounded-full bg-emerald-400 transition-[width] duration-700" style={{ width: commsJammed ? '0%' : progress + '%' }} />
+            <div className="h-1.5 rounded-full bg-slate-700/60 overflow-hidden" role="progressbar" aria-label="Crew task progress" aria-valuenow={commsJammed || progressHidden ? undefined : progress} aria-valuemin={0} aria-valuemax={100}>
+              <div className="h-full rounded-full bg-emerald-400 transition-[width] duration-700" style={{ width: commsJammed || progressHidden ? '0%' : progress + '%' }} />
             </div>
           </div>
           <div className="flight-panel mt-2 overflow-hidden">

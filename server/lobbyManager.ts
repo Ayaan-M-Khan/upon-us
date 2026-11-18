@@ -10,10 +10,15 @@ import {
   GAME_STATES,
   JOIN_CODE_ALPHABET,
   JOIN_CODE_LENGTH,
+  KILL_DISTANCE_M,
+  KillDistance,
+  LOBBY_RECONNECT_GRACE_MS,
   MAX_PLAYERS_PER_LOBBY,
   MIN_PLAYERS_TO_START,
   PLAYER_COLORS,
   PLAYER_HATS,
+  RECONNECT_GRACE_PERIOD_MS,
+  TaskBarUpdateMode,
   sanitizePlayerName,
 } from '../shared/constants';
 import { EVENTS, LobbyData, LobbyPlayer } from '../shared/events';
@@ -79,12 +84,20 @@ export class Lobby {
   }
 }
 
+/** A client-generated id that survives page refreshes, so a dropped player can reclaim their seat. */
+const isValidSessionId = (v: unknown): v is string => typeof v === 'string' && /^[A-Za-z0-9_-]{8,64}$/.test(v);
+
 export class LobbyManager {
   private io: Server;
   private gameRooms: Map<string, GameRoom> = new Map();
   private lobbies: Map<string, Lobby> = new Map();
   private socketToLobby: Map<string, string> = new Map();
   private tickInterval: NodeJS.Timeout | null = null;
+  /** sessionId -> current player id (socket id) of the seat it owns. */
+  private sessionToPlayer: Map<string, string> = new Map();
+  private playerToSession: Map<string, string> = new Map();
+  /** Seats whose socket dropped, waiting for a rejoin before being removed. */
+  private disconnectTimers: Map<string, NodeJS.Timeout> = new Map();
 
   constructor(io: Server) {
     this.io = io;
@@ -103,7 +116,7 @@ export class LobbyManager {
     return code;
   }
 
-  public createLobby(socket: Socket, playerName: string, isPrivate: boolean = false, hatId?: string): void {
+  public createLobby(socket: Socket, playerName: string, isPrivate: boolean = false, hatId?: string, sessionId?: unknown): void {
     // Leave any existing lobby first
     this.leaveLobby(socket);
 
@@ -127,15 +140,16 @@ export class LobbyManager {
     lobby.players.set(socket.id, player);
     this.lobbies.set(code, lobby);
     this.socketToLobby.set(socket.id, code);
+    this.bindSession(socket.id, sessionId);
 
     socket.join(code);
     socket.emit(EVENTS.LOBBY_STATE, lobby.toJSON());
   }
 
-  public joinLobby(socket: Socket, codeRaw: string, playerName: string, hatId?: string): void {
+  public joinLobby(socket: Socket, codeRaw: string, playerName: string, hatId?: string, sessionId?: unknown): void {
     this.leaveLobby(socket);
 
-    const code = (codeRaw || '').trim().toUpperCase();
+    const code = (typeof codeRaw === 'string' ? codeRaw : '').trim().toUpperCase();
     const lobby = this.lobbies.get(code);
 
     if (!lobby) {
@@ -174,6 +188,7 @@ export class LobbyManager {
 
     lobby.players.set(socket.id, player);
     this.socketToLobby.set(socket.id, code);
+    this.bindSession(socket.id, sessionId);
 
     socket.join(code);
     this.broadcastLobbyState(lobby);
@@ -198,6 +213,14 @@ export class LobbyManager {
       player.colorId = validColor.id;
       this.broadcastLobbyState(lobby);
     }
+  }
+
+  public setReady(socket: Socket, ready: boolean): void {
+    const lobby = this.getLobbyBySocket(socket);
+    const player = lobby?.players.get(socket.id);
+    if (!lobby || !player || lobby.state !== GAME_STATES.LOBBY || player.isReady === ready) return;
+    player.isReady = ready;
+    this.broadcastLobbyState(lobby);
   }
 
   public setHat(socket: Socket, hatId: string): void {
@@ -238,6 +261,16 @@ export class LobbyManager {
     s.emergencyCooldown = clampNumber(s.emergencyCooldown, 15, 0, 60, true);
     s.discussionTime = clampNumber(s.discussionTime, 15, 0, 120, true);
     s.votingTime = clampNumber(s.votingTime, 120, 15, 300, true);
+    // Always leave crewmates at least one task, otherwise the task bar starts full and crew wins instantly.
+    if (s.commonTasks + s.shortTasks + s.longTasks === 0) s.shortTasks = 1;
+    s.killDistance = (Object.keys(KILL_DISTANCE_M) as KillDistance[]).includes(s.killDistance)
+      ? s.killDistance : lobby.settings.killDistance;
+    s.taskBarUpdates = (['Always', 'Meetings', 'Never'] as TaskBarUpdateMode[]).includes(s.taskBarUpdates)
+      ? s.taskBarUpdates : lobby.settings.taskBarUpdates;
+    s.confirmEjects = s.confirmEjects === true;
+    s.anonymousVotes = s.anonymousVotes === true;
+    s.visualTasks = s.visualTasks !== false;
+    s.map = DEFAULT_GAME_SETTINGS.map; // only one map exists
     s.fillWithBots = s.fillWithBots !== false;
 
     lobby.settings = s;
@@ -255,11 +288,10 @@ export class LobbyManager {
 
     if (targetSocketId === socket.id) return; // Cannot kick self
 
+    if (!lobby.players.has(targetSocketId)) return;
     const targetSocket = this.io.sockets.sockets.get(targetSocketId);
-    if (targetSocket) {
-      targetSocket.emit(EVENTS.LOBBY_ERROR, { message: 'You have been kicked from the lobby by the host.' });
-      this.leaveLobby(targetSocket);
-    }
+    targetSocket?.emit(EVENTS.REMOVED_FROM_LOBBY, { message: 'You were removed from the lobby by the host.' });
+    this.removeSeat(lobby.code, targetSocketId);
   }
 
   public handleLobbyInput(
@@ -272,10 +304,11 @@ export class LobbyManager {
     const player = lobby.players.get(socket.id);
     if (!player) return;
 
+    if (!input || ![input.x, input.z].every((n) => Number.isFinite(n))) return;
     // Bounds check for dropship room (-8 to 8 on X, -4 to 4 on Z)
     player.x = Math.max(-7.5, Math.min(7.5, input.x));
     player.z = Math.max(-3.5, Math.min(3.5, input.z));
-    player.rotation = input.rotation || 0;
+    player.rotation = Number.isFinite(input.rotation) ? input.rotation : 0;
     player.isMoving = !!input.isMoving;
   }
 
@@ -348,6 +381,7 @@ export class LobbyManager {
     if (!lobby) return;
     lobby.state = GAME_STATES.LOBBY;
     for (const p of lobby.players.values()) {
+      p.isReady = false;
       p.x = (Math.random() - 0.5) * 4;
       p.z = (Math.random() - 0.5) * 2;
       p.isMoving = false;
@@ -372,17 +406,108 @@ export class LobbyManager {
     }
   }
 
+  /** Deliberate exit (Leave button, creating/joining another lobby): the seat is released immediately. */
   public leaveLobby(socket: Socket): void {
     const code = this.socketToLobby.get(socket.id);
     if (!code) return;
-
-    this.socketToLobby.delete(socket.id);
     socket.leave(code);
+    this.removeSeat(code, socket.id);
+  }
+
+  /**
+   * Connection dropped. If the client registered a session, hold the seat so a refresh or network blip
+   * doesn't eject them (or end the match); otherwise behave like a normal leave.
+   */
+  public handleDisconnect(socket: Socket): void {
+    const code = this.socketToLobby.get(socket.id);
+    if (!code) return;
+    const lobby = this.lobbies.get(code);
+    const player = lobby?.players.get(socket.id);
+    if (!lobby || !player || !this.playerToSession.has(socket.id)) {
+      this.removeSeat(code, socket.id);
+      return;
+    }
+
+    player.disconnected = true;
+    player.isMoving = false;
+    this.gameRooms.get(code)?.setDisconnected(socket.id, true);
+    // RECONNECT_GRACE_MS (env) overrides both holds; used by the multiplayer smoke test.
+    const override = Number(process.env.RECONNECT_GRACE_MS);
+    const grace = override > 0 ? override
+      : lobby.state === GAME_STATES.LOBBY ? LOBBY_RECONNECT_GRACE_MS : RECONNECT_GRACE_PERIOD_MS;
+    const playerId = socket.id;
+    this.clearDisconnectTimer(playerId);
+    this.disconnectTimers.set(
+      playerId,
+      setTimeout(() => {
+        this.disconnectTimers.delete(playerId);
+        const currentCode = this.socketToLobby.get(playerId);
+        if (currentCode) this.removeSeat(currentCode, playerId);
+      }, grace)
+    );
+    this.broadcastLobbyState(lobby);
+  }
+
+  /** A reconnecting client reclaims the seat held for its session; all ids are re-keyed to the new socket. */
+  public rejoin(socket: Socket, sessionId: unknown): void {
+    const fail = (message: string, retry = false): void => {
+      socket.emit(EVENTS.REJOIN_FAILED, { message, retry });
+    };
+    if (!isValidSessionId(sessionId)) return fail('Your previous session could not be restored.');
+
+    const oldId = this.sessionToPlayer.get(sessionId);
+    const code = oldId ? this.socketToLobby.get(oldId) : undefined;
+    const lobby = code ? this.lobbies.get(code) : undefined;
+    const player = oldId && lobby ? lobby.players.get(oldId) : undefined;
+    if (!oldId || !code || !lobby || !player) {
+      if (oldId) this.unbindSession(oldId);
+      return fail('Your seat was released while you were away. Join again with the room code.');
+    }
+    if (oldId === socket.id) {
+      socket.emit(EVENTS.LOBBY_STATE, lobby.toJSON());
+      return;
+    }
+    // Old socket still open: either a refresh whose close hasn't arrived yet (client retries), or the
+    // same session in a duplicated tab (retries run out). Never steal a live seat.
+    if (this.io.sockets.sockets.get(oldId)?.connected) {
+      return fail('This seat is already in use in another tab.', true);
+    }
+
+    // If this socket was sitting in some other lobby, release that first.
+    if (this.socketToLobby.has(socket.id)) this.leaveLobby(socket);
+
+    this.clearDisconnectTimer(oldId);
+    lobby.players.delete(oldId);
+    player.id = socket.id;
+    player.disconnected = false;
+    lobby.players.set(socket.id, player);
+    if (lobby.hostId === oldId) lobby.hostId = socket.id;
+    this.socketToLobby.delete(oldId);
+    this.socketToLobby.set(socket.id, code);
+    this.sessionToPlayer.set(sessionId, socket.id);
+    this.playerToSession.delete(oldId);
+    this.playerToSession.set(socket.id, sessionId);
+    socket.join(code);
+
+    const gameRoom = this.gameRooms.get(code);
+    gameRoom?.rebindPlayer(oldId, socket.id);
+    this.broadcastLobbyState(lobby);
+    if (gameRoom) {
+      socket.emit(EVENTS.GAME_STARTED, { map: lobby.settings.map, settings: lobby.settings });
+    }
+  }
+
+  /** Remove a seat from its lobby (and running match), migrating host and cleaning up empty lobbies. */
+  private removeSeat(code: string, playerId: string): void {
+    this.clearDisconnectTimer(playerId);
+    this.unbindSession(playerId);
+    this.socketToLobby.delete(playerId);
+    this.io.sockets.sockets.get(playerId)?.leave(code);
 
     const lobby = this.lobbies.get(code);
     if (!lobby) return;
 
-    lobby.players.delete(socket.id);
+    lobby.players.delete(playerId);
 
     // If countdown was in progress and players < minimum, cancel it
     const minToStart = lobby.settings.fillWithBots ? 1 : MIN_PLAYERS_TO_START;
@@ -397,10 +522,9 @@ export class LobbyManager {
     // Clean up active game room player
     const gameRoom = this.gameRooms.get(code);
     if (gameRoom) {
-      gameRoom.removePlayer(socket.id);
+      gameRoom.removePlayer(playerId);
     }
 
-    // Host migration
     if (lobby.players.size === 0) {
       if (lobby.countdownTimer) clearInterval(lobby.countdownTimer);
       if (gameRoom) {
@@ -411,17 +535,42 @@ export class LobbyManager {
       return;
     }
 
-    if (lobby.hostId === socket.id) {
-      // Pick the first remaining player as the new host
-      const nextEntry = lobby.players.entries().next().value;
-      if (nextEntry) {
-        const [newHostId, newHostPlayer] = nextEntry;
-        lobby.hostId = newHostId;
-        newHostPlayer.isHost = true;
-      }
+    // Host migration: prefer someone who is actually connected.
+    if (lobby.hostId === playerId || !lobby.players.has(lobby.hostId)) {
+      const players = [...lobby.players.values()];
+      const next = players.find((p) => !p.disconnected) ?? players[0];
+      lobby.hostId = next.id;
     }
+    for (const p of lobby.players.values()) p.isHost = p.id === lobby.hostId;
 
     this.broadcastLobbyState(lobby);
+  }
+
+  private bindSession(playerId: string, sessionId: unknown): void {
+    if (!isValidSessionId(sessionId)) return;
+    // A session owns at most one seat.
+    const previous = this.sessionToPlayer.get(sessionId);
+    if (previous && previous !== playerId) {
+      const prevCode = this.socketToLobby.get(previous);
+      if (prevCode) this.removeSeat(prevCode, previous);
+    }
+    this.sessionToPlayer.set(sessionId, playerId);
+    this.playerToSession.set(playerId, sessionId);
+  }
+
+  private unbindSession(playerId: string): void {
+    const sessionId = this.playerToSession.get(playerId);
+    if (!sessionId) return;
+    this.playerToSession.delete(playerId);
+    if (this.sessionToPlayer.get(sessionId) === playerId) this.sessionToPlayer.delete(sessionId);
+  }
+
+  private clearDisconnectTimer(playerId: string): void {
+    const t = this.disconnectTimers.get(playerId);
+    if (t) {
+      clearTimeout(t);
+      this.disconnectTimers.delete(playerId);
+    }
   }
 
   public getLobbyBySocket(socket: Socket): Lobby | undefined {

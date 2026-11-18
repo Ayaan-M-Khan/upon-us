@@ -9,9 +9,11 @@ import {
   BASE_PLAYER_SPEED,
   GameSettings,
   KILL_DISTANCE_M,
+  LIGHTS_OUT_VISION_FACTOR,
   REPORT_RANGE,
   TASK_RANGE,
   VENT_RANGE,
+  VISION_BASE_M,
 } from '../../shared/constants';
 import { GAME_STATES } from '../../shared/constants';
 import { GameStateSnapshot, SabotageType, TaskView } from '../../shared/events';
@@ -166,6 +168,8 @@ export class GameScene {
   public isViewingCameras = false;
   private cameraModeBeforeCctv: 'third_person' | 'first_person' = 'third_person';
   private visibilityWalls = MAP_WALLS;
+  private crewmateVision = 1;
+  private impostorVision = 1.5;
   public activeCameraIndex = 0;
 
   private onRoomChangeCb?: (room: string) => void;
@@ -200,6 +204,15 @@ export class GameScene {
     }
   }
 
+  /** Sight radius from the lobby's vision settings; crew vision shrinks while the lights are out. */
+  public visionRadius(): number {
+    const you = this.latest?.you;
+    const isImpostor = you?.role === 'impostor';
+    let r = VISION_BASE_M * (isImpostor ? this.impostorVision : this.crewmateVision);
+    if (!isImpostor && this.latest?.sabotage?.lightsOut) r *= LIGHTS_OUT_VISION_FACTOR;
+    return Math.max(2.5, r);
+  }
+
   /**
    * Line-of-sight & Fog of War actor visibility test:
    * Prevents players from seeing through walls into other rooms.
@@ -221,7 +234,7 @@ export class GameScene {
     }
 
     const d = Math.hypot(tx - lx, tz - lz);
-    if (d > 24) return false; // Fog of war max visual horizon
+    if (d > this.visionRadius()) return false; // outside this player's sight radius
 
     return hasLineOfSight(lx, lz, tx, tz, this.visibilityWalls);
   }
@@ -230,6 +243,8 @@ export class GameScene {
     this.container = container;
     this.localPlayerId = myId;
     this.playerSpeedMultiplier = settings.playerSpeed || 1.0;
+    this.crewmateVision = settings.crewmateVision || 1;
+    this.impostorVision = settings.impostorVision || 1.5;
     this.killDistance = KILL_DISTANCE_M[settings.killDistance] ?? KILL_DISTANCE_M.Short;
     this.onRoomChangeCb = onRoomChange;
     this.clock = new THREE.Clock();
@@ -413,6 +428,17 @@ export class GameScene {
         model.setColor(player.colorId);
         model.setHat(player.hatId);
       }
+      model.updateNameTag({
+        name: player.name,
+        isHost: player.isHost,
+        isLocal: id === this.localPlayerId,
+        isBot: player.isBot,
+        // Impostors see their partners' names in red (the server only sends teammates to impostors).
+        isImpostor: !!snapshot.you?.teammates.some((t) => t.id === id)
+          || (id === this.localPlayerId && snapshot.you?.role === 'impostor'),
+        isOffline: !!player.disconnected,
+      });
+      model.setScanning(!!player.visualTask);
 
       if (id === this.localPlayerId) {
         // Server-forced moves (kill teleport, meeting start, vents) snap us and reset sequence.

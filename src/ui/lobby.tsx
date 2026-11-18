@@ -63,13 +63,13 @@ export const LobbyView: React.FC<LobbyProps> = ({ onLeave }) => {
   const [errorMessage, setErrorMessage] = useState('');
   const [startingCount, setStartingCount] = useState<number | null>(null);
 
-  // Local state for ready status and cosmetic specialty badge
-  const [isReady, setIsReady] = useState(false);
+  // Cosmetic specialty badge (local preference)
   const [specialty, setSpecialty] = useState(() => localStorage.getItem('impostor_specialty') || 'cadet');
 
   const socketId = net.getSocketId();
   const localPlayer = lobby?.players.find((p) => p.id === socketId);
   const isHost = localPlayer?.isHost || false;
+  const isReady = !!localPlayer?.isReady;
 
   // Initialize 3D scene & network hooks
   useEffect(() => {
@@ -172,7 +172,7 @@ export const LobbyView: React.FC<LobbyProps> = ({ onLeave }) => {
 
   const handleToggleReady = () => {
     soundEngine.playClick();
-    setIsReady((prev) => !prev);
+    net.setReady(!isReady);
   };
 
   const handleUpdateSetting = <K extends keyof GameSettings>(key: K, value: GameSettings[K]) => {
@@ -554,10 +554,17 @@ export const LobbyView: React.FC<LobbyProps> = ({ onLeave }) => {
                             <span>•</span>
                             <span className="truncate">{hat?.name || 'No Hat'}</span>
                             <span>•</span>
-                            <span className="text-emerald-400 flex items-center space-x-0.5">
-                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse inline-block" />
-                              <span>24ms</span>
-                            </span>
+                            {p.disconnected ? (
+                              <span className="text-amber-400 flex items-center space-x-0.5">
+                                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse inline-block" />
+                                <span>Reconnecting…</span>
+                              </span>
+                            ) : (
+                              <span className="text-emerald-400 flex items-center space-x-0.5">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block" />
+                                <span>{p.isHost ? 'Online' : p.isReady ? 'Ready' : 'Online'}</span>
+                              </span>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -875,6 +882,27 @@ export const LobbyView: React.FC<LobbyProps> = ({ onLeave }) => {
                     </button>
                   ) : (
                     <span>{lobby?.settings.visualTasks ? 'ON' : 'OFF'}</span>
+                  )}
+                </div>
+                <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800 flex items-center justify-between font-bold text-slate-300">
+                  <span>TASK BAR UPDATES</span>
+                  {isHost ? (
+                    <div className="flex gap-1" role="group" aria-label="Task bar updates">
+                      {(['Always', 'Meetings', 'Never'] as const).map((mode) => (
+                        <button
+                          key={mode}
+                          onClick={() => handleUpdateSetting('taskBarUpdates', mode)}
+                          aria-pressed={lobby?.settings.taskBarUpdates === mode}
+                          className={`px-2 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                            lobby?.settings.taskBarUpdates === mode ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-300'
+                          }`}
+                        >
+                          {mode}
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <span>{lobby?.settings.taskBarUpdates ?? 'Always'}</span>
                   )}
                 </div>
               </div>

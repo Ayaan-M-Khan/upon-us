@@ -359,7 +359,8 @@ export const GameView: React.FC<GameViewProps> = ({ settings, onLeave }) => {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [doUse, doReport, doKill, doVent, handleRepairSabotage, handleToggleHitboxes, handleVentMove, stopWork, you, ctx.sabotagePartId, ctx.sabotageType, activeSabotageGame]);
+  }, [doUse, doReport, doKill, doVent, handleRepairSabotage, handleToggleHitboxes, handleVentMove, stopWork, you, ctx.sabotagePartId, ctx.sabotageType, activeSabotageGame,
+    isViewingCameras, activeCameraIndex, handleSelectCameraFeed, handleToggleSecurityCameras]);
 
   const handleLeaveMatch = () => {
     net.leaveLobby();
@@ -379,6 +380,14 @@ export const GameView: React.FC<GameViewProps> = ({ settings, onLeave }) => {
     <div className="relative w-full h-full overflow-hidden bg-slate-950">
       {/* 3D WebGL Canvas */}
       <div ref={mountRef} className="absolute inset-0 w-full h-full" />
+      {/* Lights sabotage: living crew only see a small circle around themselves (matches the shrunken sight radius). */}
+      {playing && snapshot?.sabotage?.lightsOut && you?.role !== 'impostor' && me?.isAlive && !isViewingCameras && (
+        <div
+          aria-hidden="true"
+          className="absolute inset-0 pointer-events-none transition-opacity duration-700"
+          style={{ background: 'radial-gradient(circle at 50% 56%, transparent 0, transparent 13vmin, rgba(2,4,10,0.88) 30vmin, rgba(2,4,10,0.96) 60vmin)' }}
+        />
+      )}
 
       <GameHud
         currentRoom={currentRoom}

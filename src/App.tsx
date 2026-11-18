@@ -17,10 +17,12 @@ export default function App() {
   const [initialJoinCode, setInitialJoinCode] = useState<string>('');
   const [connectionState, setConnectionState] = useState<ConnectionState>(net.getConnectionState());
   const [connectionLost, setConnectionLost] = useState(false);
+  const [rejoining, setRejoining] = useState(false);
 
   useEffect(() => {
     const unsubConnection = net.onConnectionState((state) => {
       setConnectionState(state);
+      setRejoining(net.isRejoining());
       if (state === 'reconnecting' || state === 'offline') setConnectionLost(true);
     });
     // 1. Initialize Network Client
@@ -36,6 +38,7 @@ export default function App() {
     // 3. Listen to authoritative lobby state
     const unsubLobby = net.onLobbyState((lobby) => {
       setCurrentLobby(lobby);
+      setRejoining(net.isRejoining());
       if (lobby) setConnectionLost(false);
       if (lobby && lobby.state === GAME_STATES.PLAYING) {
         setIsPlaying(true);
@@ -73,10 +76,30 @@ export default function App() {
             setCurrentLobby(null);
           }}
         />
+      ) : rejoining ? (
+        <div role="status" aria-live="polite" className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-slate-200">
+          <div className="h-10 w-10 rounded-full border-4 border-cyan-400/30 border-t-cyan-300 animate-spin" />
+          <p className="text-lg font-semibold">Rejoining your match…</p>
+        </div>
       ) : (
         <MainMenu onLobbyJoined={() => {}} initialJoinCode={initialJoinCode} />
       )}
-      {!currentLobby && (connectionState !== 'connected' || connectionLost) && (
+      {currentLobby && connectionState !== 'connected' && (
+        <div role="alert" className="absolute inset-0 z-[60] flex items-center justify-center bg-slate-950/70 backdrop-blur-sm px-4">
+          <div className="w-full max-w-sm rounded-xl border border-slate-600/60 bg-slate-950/95 p-5 text-center text-slate-200 shadow-xl">
+            <div className="mx-auto mb-3 h-8 w-8 rounded-full border-4 border-amber-400/30 border-t-amber-300 animate-spin" />
+            <p className="font-semibold">Connection lost. Reconnecting…</p>
+            <p className="mt-1 text-sm text-slate-400">Your seat is held for about a minute.</p>
+            <div className="mt-4 flex justify-center gap-2">
+              {connectionState === 'offline' && (
+                <button onClick={() => net.retryConnection()} className="rounded-lg px-3 py-2 bg-cyan-600 hover:bg-cyan-500 text-white font-semibold cursor-pointer focus-visible:outline-2 focus-visible:outline-cyan-200">Retry</button>
+              )}
+              <button onClick={() => net.leaveLobby()} className="rounded-lg px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold cursor-pointer focus-visible:outline-2 focus-visible:outline-cyan-200">Leave match</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {!currentLobby && !rejoining && (connectionState !== 'connected' || connectionLost) && (
         <div role="status" aria-live="polite" className="absolute bottom-4 left-1/2 -translate-x-1/2 z-50 w-[calc(100%_-_2rem)] max-w-md rounded-xl border border-slate-600/60 bg-slate-950/95 px-4 py-3 shadow-xl flex items-center justify-between gap-3 text-sm text-slate-200">
           <span>
             {connectionState === 'connecting' && 'Connecting to the ship server…'}

@@ -8,7 +8,10 @@ export const JOIN_CODE_LENGTH = 5;
 export const MAX_PLAYER_NAME_LENGTH = 10;
 export const MIN_PLAYERS_TO_START = 4;
 export const MAX_PLAYERS_PER_LOBBY = 10;
+/** How long a disconnected player's seat is held during a match before they are removed. */
 export const RECONNECT_GRACE_PERIOD_MS = 60000;
+/** Seat hold in the waiting room (shorter so a vanished host doesn't block the lobby for long). */
+export const LOBBY_RECONNECT_GRACE_MS = 20000;
 
 export interface PlayerColor {
   id: string;
@@ -115,6 +118,10 @@ export const MEETING_EJECTION_MS = 6000;
 export const ROLE_REVEAL_MS = 5000;
 export const GAME_OVER_MS = 9000;
 export const MAX_CHAT_LENGTH = 100;
+/** Sight radius (metres) at 1.0x vision; scaled by the crewmate/impostor vision settings. */
+export const VISION_BASE_M = 14;
+/** Crew vision multiplier while the lights are sabotaged (impostors are unaffected). */
+export const LIGHTS_OUT_VISION_FACTOR = 0.35;
 
 export const BOT_NAMES = ['Beep', 'Boop', 'Nova', 'Orbit', 'Comet', 'Pixel', 'Zap', 'Echo', 'Luna', 'Sparky'];
 
@@ -142,8 +149,8 @@ export type MeetingSubstate = (typeof MEETING_SUBSTATES)[keyof typeof MEETING_SU
 // Basic profanity check
 const BANNED_WORDS = ['fuck', 'shit', 'bitch', 'asshole', 'nigger', 'faggot', 'cunt', 'dick'];
 
-export function sanitizePlayerName(name: string): string {
-  let cleaned = name.trim().slice(0, MAX_PLAYER_NAME_LENGTH);
+export function sanitizePlayerName(name: unknown): string {
+  let cleaned = (typeof name === 'string' ? name : '').trim().slice(0, MAX_PLAYER_NAME_LENGTH);
   if (!cleaned) cleaned = 'Crewmate';
   const lower = cleaned.toLowerCase();
   for (const bad of BANNED_WORDS) {

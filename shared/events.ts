@@ -12,6 +12,7 @@ export const EVENTS = {
   UPDATE_SETTINGS: 'updateSettings',
   SET_COLOR: 'setColor',
   SET_HAT: 'setHat',
+  SET_READY: 'setReady',
   KICK_PLAYER: 'kickPlayer',
   START_GAME: 'startGame',
   START_TEST_GAME: 'startTestGame', // Host can start in test mode with 1-3 players
@@ -29,7 +30,7 @@ export const EVENTS = {
   FIX_SABOTAGE: 'fixSabotage',
   CHAT_MESSAGE: 'chatMessage',
   CAST_VOTE: 'castVote',
-  REJOIN: 'rejoin',
+  REJOIN: 'rejoin', // { sessionId } re-binds a held seat to a new socket
   VOICE_STREAM: 'voiceStream',
   VOICE_STATE: 'voiceState',
 
@@ -56,6 +57,8 @@ export const EVENTS = {
   VOTE_CAST_ACK: 'voteCastAck',
   VOICE_RELAY: 'voiceRelay',
   VOICE_STATE_RELAY: 'voiceStateRelay',
+  REJOIN_FAILED: 'rejoinFailed', // { message } the held seat is gone (expired, game over, or server restarted)
+  REMOVED_FROM_LOBBY: 'removedFromLobby', // { message } this client was kicked
 } as const;
 
 export type Role = 'crewmate' | 'impostor' | 'engineer';
@@ -72,6 +75,8 @@ export interface LobbyPlayer {
   isMoving: boolean;
   isAlive?: boolean;
   room?: string;
+  /** True while the player's connection is down and their seat is being held for a rejoin. */
+  disconnected?: boolean;
 }
 
 export interface LobbyData {
@@ -100,6 +105,10 @@ export interface PlayerSnapshot {
   /** Incremented whenever the server teleports a player (kill, meeting start). Clients snap when it changes. */
   posSeq?: number;
   inVent?: boolean;
+  /** True while the player's connection is down and their seat is being held for a rejoin. */
+  disconnected?: boolean;
+  /** Doing a visual task (scan, asteroids, shields, garbage) that others can see; only with Visual Tasks on. */
+  visualTask?: boolean;
 }
 
 export interface TaskView {

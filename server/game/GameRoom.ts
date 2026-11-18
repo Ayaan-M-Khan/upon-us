@@ -137,6 +137,8 @@ export class GameRoom {
   private winner: 'crewmates' | 'impostors' | null = null;
   private ended = false;
   private chatCounter = 0;
+  /** Task bar value shown to players when taskBarUpdates is 'Meetings' (refreshed at each meeting). */
+  private meetingTaskProgress = 0;
 
   private tickInterval: NodeJS.Timeout | null = null;
   private lastTickTime = Date.now();
@@ -146,7 +148,7 @@ export class GameRoom {
     code: string,
     io: Server,
     settings: GameSettings,
-    lobbyPlayers: { id: string; name: string; colorId: string; hatId: string; isHost: boolean }[],
+    lobbyPlayers: { id: string; name: string; colorId: string; hatId: string; isHost: boolean; disconnected?: boolean }[],
     onEnd: () => void = () => {}
   ) {
     this.code = code;
@@ -156,7 +158,7 @@ export class GameRoom {
     this.stateMachine = new GameStateMachine();
 
     // --- Seats: humans first, then bots up to the minimum player count ---
-    const seats: { id: string; name: string; colorId: string; hatId: string; isHost: boolean; isBot: boolean }[] =
+    const seats: { id: string; name: string; colorId: string; hatId: string; isHost: boolean; isBot: boolean; disconnected?: boolean }[] =
       lobbyPlayers.map((lp) => ({ ...lp, isBot: false }));
 
     const botsNeeded = settings.fillWithBots ? Math.max(0, MIN_PLAYERS_TO_START - seats.length) : 0;
@@ -211,6 +213,7 @@ export class GameRoom {
         lastChatAt: 0,
         engineerVentReadyAt: 0,
         engineerVentEndsAt: 0,
+        disconnected: !!seat.disconnected,
       };
       if (seat.isBot) gp.brain = this.newBrain(spawn);
       this.players.set(seat.id, gp);
@@ -283,6 +286,66 @@ export class GameRoom {
     const state = this.stateMachine.currentState;
     if (state === GAME_STATES.PLAYING || state === GAME_STATES.MEETING) this.checkWin();
     if (this.humans().length === 0) this.destroy();
+  }
+
+  /** Connection dropped (seat held) or restored: freeze the avatar and stop any in-progress action. */
+  public setDisconnected(id: string, disconnected: boolean): void {
+    const p = this.players.get(id);
+    if (!p) return;
+    p.disconnected = disconnected;
+    p.isMoving = false;
+    p.working = null;
+    this.reactorHolds.delete(id);
+  }
+
+  /** A held seat is reclaimed by a new socket: re-key every reference from the old id to the new one. */
+  public rebindPlayer(oldId: string, newId: string): void {
+    const p = this.players.get(oldId);
+    if (!p || oldId === newId) return;
+    this.players.delete(oldId);
+    p.id = newId;
+    p.disconnected = false;
+    p.isMoving = false;
+    p.lastInputAt = Date.now();
+    p.posSeq = (p.posSeq || 0) + 1; // make the fresh client snap to the authoritative position
+    this.players.set(newId, p);
+
+    const body = this.bodies.get(oldId);
+    if (body) {
+      this.bodies.delete(oldId);
+      body.id = newId;
+      this.bodies.set(newId, body);
+    }
+    for (const b of this.bodies.values()) if (b.killerId === oldId) b.killerId = newId;
+    this.reactorHolds.delete(oldId);
+
+    const m = this.meeting;
+    if (m) {
+      if (m.callerId === oldId) m.callerId = newId;
+      const votes = new Map<string, string>();
+      for (const [voter, target] of m.votes) {
+        votes.set(voter === oldId ? newId : voter, target === oldId ? newId : target);
+      }
+      m.votes = votes;
+      if (m.results) {
+        const r = m.results;
+        if (r.ejectedId === oldId) r.ejectedId = newId;
+        r.votes = r.votes.map((v) => ({
+          voterId: v.voterId === oldId ? newId : v.voterId,
+          targetId: v.targetId === oldId ? newId : v.targetId,
+        }));
+        if (oldId in r.tally) {
+          r.tally[newId] = r.tally[oldId];
+          delete r.tally[oldId];
+        }
+      }
+    }
+    for (const other of this.players.values()) {
+      const brain = other.brain;
+      if (!brain) continue;
+      if (brain.suspectId === oldId) brain.suspectId = newId;
+      if (brain.targetId === oldId) brain.targetId = newId;
+    }
   }
 
   public startTask(id: string, taskId: string): void {
@@ -486,7 +549,14 @@ export class GameRoom {
 
   private startSimulation(): void {
     this.lastTickTime = Date.now();
-    this.tickInterval = setInterval(() => this.tick(), 50);
+    this.tickInterval = setInterval(() => {
+      try {
+        this.tick();
+      } catch (err) {
+        // Keep the match (and the process) alive; a single bad tick shouldn't take everyone down.
+        console.error(`[Impostor Protocol] Game ${this.code} tick failed:`, err);
+      }
+    }, 50);
   }
 
   private tick(): void {
@@ -547,12 +617,18 @@ export class GameRoom {
         isBot: p.isBot,
         posSeq: p.posSeq,
         inVent: p.inVent,
+        disconnected: p.disconnected || undefined,
+        visualTask: this.isDoingVisualTask(p) || undefined,
       };
     }
 
     const bodies: BodyView[] = [...this.bodies.values()].map((b) => ({ id: b.id, colorId: b.colorId, x: b.x, z: b.z }));
     const meeting = this.meeting ? this.meetingView(now) : undefined;
-    const taskProgress = this.taskProgress();
+    // Task bar honours the lobby's Task Bar Updates setting; 'Never' sends nothing at all.
+    const mode = this.settings.taskBarUpdates;
+    const taskProgress = mode === 'Never' ? undefined
+      : mode === 'Meetings' && this.stateMachine.currentState !== GAME_STATES.GAME_OVER ? this.meetingTaskProgress
+      : this.taskProgress();
 
     for (const human of this.humans()) {
       const snapshot: GameStateSnapshot = {
@@ -574,6 +650,15 @@ export class GameRoom {
   // ---------------------------------------------------------------------------
   // Tasks
   // ---------------------------------------------------------------------------
+
+  private isDoingVisualTask(p: GamePlayer): boolean {
+    if (!this.settings.visualTasks || !p.isAlive || this.stateMachine.currentState !== GAME_STATES.PLAYING) return false;
+    const taskId = p.brain
+      ? p.brain.mode === 'work' ? p.brain.currentTask?.def.id : undefined
+      : p.working?.taskId;
+    if (!taskId) return false;
+    return !!p.tasks.find((t) => t.def.id === taskId)?.def.visual;
+  }
 
   private currentStep(p: GamePlayer, taskId: string): TaskView | null {
     const t = p.tasks.find((x) => x.def.id === taskId);
@@ -701,6 +786,7 @@ export class GameRoom {
       votes: new Map(),
     };
     this.bodies.clear();
+    this.meetingTaskProgress = this.taskProgress();
     this.stateMachine.transitionTo(GAME_STATES.MEETING);
 
     // Everyone gathers around the table; vents and tasks are interrupted.
@@ -753,8 +839,9 @@ export class GameRoom {
             this.castVote(p.id, this.botChooseVote(p));
           }
         }
-        const alive = [...this.players.values()].filter((p) => p.isAlive);
-        if (alive.every((p) => m.votes.has(p.id)) || now >= m.endsAt) this.tallyVotes(m, now);
+        // Players whose connection is down can't vote, so don't make everyone wait for them.
+        const voters = [...this.players.values()].filter((p) => p.isAlive && !p.disconnected);
+        if (voters.every((p) => m.votes.has(p.id)) || now >= m.endsAt) this.tallyVotes(m, now);
         break;
       }
       case 'RESULTS':

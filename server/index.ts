@@ -24,48 +24,68 @@ export function createGameServer() {
   const lobbyManager = new LobbyManager(io);
 
   io.on('connection', (socket) => {
+    // Every handler runs inside try/catch: a malformed payload from one client must never throw out of
+    // the socket's event emitter, which would crash the whole server process for every lobby.
+    const on = <T extends unknown[]>(event: string, handler: (...args: T) => void) => {
+      socket.on(event, (...args: unknown[]) => {
+        try {
+          handler(...(args as T));
+        } catch (err) {
+          console.error(`[Impostor Protocol] Error handling "${event}" from ${socket.id}:`, err);
+        }
+      });
+    };
+
     // Lobby creation & joining
-    socket.on(EVENTS.CREATE_LOBBY, (data: { playerName: string; isPrivate?: boolean; hatId?: string }) => {
-      lobbyManager.createLobby(socket, data?.playerName || 'Crewmate', data?.isPrivate || false, data?.hatId);
+    on(EVENTS.CREATE_LOBBY, (data: { playerName: string; isPrivate?: boolean; hatId?: string; sessionId?: string }) => {
+      lobbyManager.createLobby(socket, data?.playerName || 'Crewmate', data?.isPrivate === true, data?.hatId, data?.sessionId);
     });
 
-    socket.on(EVENTS.JOIN_LOBBY, (data: { code: string; playerName: string; hatId?: string }) => {
-      lobbyManager.joinLobby(socket, data?.code || '', data?.playerName || 'Crewmate', data?.hatId);
+    on(EVENTS.JOIN_LOBBY, (data: { code: string; playerName: string; hatId?: string; sessionId?: string }) => {
+      lobbyManager.joinLobby(socket, data?.code || '', data?.playerName || 'Crewmate', data?.hatId, data?.sessionId);
     });
 
-    socket.on(EVENTS.LEAVE_LOBBY, () => {
+    on(EVENTS.REJOIN, (data: { sessionId?: string }) => {
+      lobbyManager.rejoin(socket, data?.sessionId);
+    });
+
+    on(EVENTS.LEAVE_LOBBY, () => {
       lobbyManager.leaveLobby(socket);
     });
 
-    socket.on(EVENTS.SET_COLOR, (data: { colorId: string }) => {
+    on(EVENTS.SET_COLOR, (data: { colorId: string }) => {
       lobbyManager.setColor(socket, data?.colorId);
     });
 
-    socket.on(EVENTS.SET_HAT, (data: { hatId: string }) => {
+    on(EVENTS.SET_HAT, (data: { hatId: string }) => {
       lobbyManager.setHat(socket, data?.hatId);
     });
 
-    socket.on(EVENTS.UPDATE_SETTINGS, (data: { settings: any }) => {
+    on(EVENTS.SET_READY, (data: { ready: boolean }) => {
+      lobbyManager.setReady(socket, data?.ready === true);
+    });
+
+    on(EVENTS.UPDATE_SETTINGS, (data: { settings: any }) => {
       lobbyManager.updateSettings(socket, data?.settings || {});
     });
 
-    socket.on(EVENTS.KICK_PLAYER, (data: { targetSocketId: string }) => {
+    on(EVENTS.KICK_PLAYER, (data: { targetSocketId: string }) => {
       lobbyManager.kickPlayer(socket, data?.targetSocketId);
     });
 
-    socket.on(EVENTS.START_GAME, () => {
+    on(EVENTS.START_GAME, () => {
       lobbyManager.startGame(socket, false);
     });
 
-    socket.on(EVENTS.START_TEST_GAME, () => {
+    on(EVENTS.START_TEST_GAME, () => {
       lobbyManager.startGame(socket, true);
     });
 
-    socket.on(EVENTS.LOBBY_INPUT, (data: { x: number; z: number; rotation: number; isMoving: boolean }) => {
+    on(EVENTS.LOBBY_INPUT, (data: { x: number; z: number; rotation: number; isMoving: boolean }) => {
       lobbyManager.handleLobbyInput(socket, data);
     });
 
-    socket.on(
+    on(
       EVENTS.PLAYER_INPUT,
       (data: { seq: number; x: number; z: number; rotation: number; isMoving: boolean }) => {
         lobbyManager.handlePlayerInput(socket, data);
@@ -74,19 +94,19 @@ export function createGameServer() {
 
     // ---- In-game actions (all validated again by the GameRoom) ----
     const room = () => lobbyManager.gameRoomFor(socket);
-    socket.on(EVENTS.USE_TASK, (d: { taskId: string }) => room()?.startTask(socket.id, String(d?.taskId)));
-    socket.on(EVENTS.COMPLETE_TASK_STEP, (d: { taskId: string }) => room()?.completeTaskStep(socket.id, String(d?.taskId)));
-    socket.on('cancelTask', () => room()?.cancelTask(socket.id));
-    socket.on(EVENTS.KILL_ATTEMPT, (d: { targetId: string }) => room()?.killAttempt(socket.id, String(d?.targetId)));
-    socket.on(EVENTS.REPORT_BODY, (d: { bodyId: string }) => room()?.reportBody(socket.id, String(d?.bodyId)));
-    socket.on(EVENTS.CALL_EMERGENCY, () => room()?.callEmergency(socket.id));
-    socket.on(EVENTS.VENT_ENTER, (d: { ventId: string }) => room()?.ventEnter(socket.id, String(d?.ventId)));
-    socket.on(EVENTS.VENT_MOVE, (d: { ventId: string }) => room()?.ventMove(socket.id, String(d?.ventId)));
-    socket.on(EVENTS.VENT_EXIT, () => room()?.ventExit(socket.id));
-    socket.on(EVENTS.CAST_VOTE, (d: { targetId: string }) => room()?.castVote(socket.id, String(d?.targetId)));
-    socket.on(EVENTS.CHAT_MESSAGE, (d: { text: string }) => room()?.chat(socket.id, String(d?.text ?? '')));
-    socket.on(EVENTS.SABOTAGE, (d: { type: import('../shared/events').SabotageType; room?: string }) => room()?.triggerSabotage(socket.id, d?.type, d?.room));
-    socket.on(EVENTS.FIX_SABOTAGE, (d: { partId?: number; holding?: boolean }) => {
+    on(EVENTS.USE_TASK, (d: { taskId: string }) => room()?.startTask(socket.id, String(d?.taskId)));
+    on(EVENTS.COMPLETE_TASK_STEP, (d: { taskId: string }) => room()?.completeTaskStep(socket.id, String(d?.taskId)));
+    on('cancelTask', () => room()?.cancelTask(socket.id));
+    on(EVENTS.KILL_ATTEMPT, (d: { targetId: string }) => room()?.killAttempt(socket.id, String(d?.targetId)));
+    on(EVENTS.REPORT_BODY, (d: { bodyId: string }) => room()?.reportBody(socket.id, String(d?.bodyId)));
+    on(EVENTS.CALL_EMERGENCY, () => room()?.callEmergency(socket.id));
+    on(EVENTS.VENT_ENTER, (d: { ventId: string }) => room()?.ventEnter(socket.id, String(d?.ventId)));
+    on(EVENTS.VENT_MOVE, (d: { ventId: string }) => room()?.ventMove(socket.id, String(d?.ventId)));
+    on(EVENTS.VENT_EXIT, () => room()?.ventExit(socket.id));
+    on(EVENTS.CAST_VOTE, (d: { targetId: string }) => room()?.castVote(socket.id, String(d?.targetId)));
+    on(EVENTS.CHAT_MESSAGE, (d: { text: string }) => room()?.chat(socket.id, String(d?.text ?? '')));
+    on(EVENTS.SABOTAGE, (d: { type: import('../shared/events').SabotageType; room?: string }) => room()?.triggerSabotage(socket.id, d?.type, d?.room));
+    on(EVENTS.FIX_SABOTAGE, (d: { partId?: number; holding?: boolean }) => {
       if (typeof d?.holding === 'boolean' && typeof d.partId === 'number') {
         room()?.holdReactorScanner(socket.id, d.partId, d.holding);
       } else {
@@ -94,8 +114,8 @@ export function createGameServer() {
       }
     });
 
-    socket.on('disconnect', () => {
-      lobbyManager.leaveLobby(socket);
+    on('disconnect', () => {
+      lobbyManager.handleDisconnect(socket);
     });
   });
 

@@ -39,6 +39,9 @@ export const MainMenu: React.FC<MenuProps> = ({ onLobbyJoined, initialJoinCode }
   const [sfxVol, setSfxVol] = useState(soundEngine.sfxVolume);
 
   useEffect(() => {
+    // Explain why we landed back here (kicked, or the held seat expired while we were away).
+    const exitMessage = net.consumeExitMessage();
+    if (exitMessage) setErrorMessage(exitMessage);
     if (initialJoinCode) {
       setJoinCodeInput(initialJoinCode.toUpperCase());
     }

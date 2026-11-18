@@ -13,6 +13,8 @@ interface NameTagOptions {
   isDead?: boolean;
   isImpostor?: boolean;
   isBot?: boolean;
+  /** Connection dropped; seat is held for a rejoin. */
+  isOffline?: boolean;
 }
 
 export class CrewmateModel {
@@ -510,7 +512,7 @@ export class CrewmateModel {
 
   public updateNameTag(player: string | NameTagOptions, host = false): void {
     const options = typeof player === 'string' ? { name: player, isHost: host } : player;
-    const tagKey = `${options.name}:${!!options.isHost}:${!!options.isLocal}:${!!options.isDead}:${!!options.isImpostor}:${!!options.isBot}`;
+    const tagKey = `${options.name}:${!!options.isHost}:${!!options.isLocal}:${!!options.isDead}:${!!options.isImpostor}:${!!options.isBot}:${!!options.isOffline}`;
     if (tagKey === this.currentNameTag) return;
     this.currentNameTag = tagKey;
     const name = options.name;
@@ -552,7 +554,11 @@ export class CrewmateModel {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
 
-    const displayName = isHost ? `👑 ${name}` : name;
+    const displayName = `${isHost ? '👑 ' : ''}${name}${options.isOffline ? ' (offline)' : ''}`;
+    if (options.isOffline) ctx.globalAlpha = 0.6;
+    for (let size = 24; size > 12 && ctx.measureText(displayName).width > 210; size -= 2) {
+      ctx.font = `bold ${size}px Fredoka, Nunito, sans-serif`;
+    }
     ctx.fillText(displayName, 128, 32);
 
     const texture = new THREE.CanvasTexture(canvas);
@@ -636,7 +642,29 @@ export class CrewmateModel {
     this.onDeathComplete = onComplete;
   }
 
+  private scanRing: THREE.Mesh | null = null;
+  private scanTime = 0;
+
+  /** Green scanner ring shown while this player does a visual task (proof of crewmate innocence). */
+  public setScanning(active: boolean): void {
+    if (active && !this.scanRing) {
+      const mat = new THREE.MeshBasicMaterial({
+        color: 0x4ade80, transparent: true, opacity: 0.55, side: THREE.DoubleSide, depthWrite: false,
+      });
+      this.scanRing = new THREE.Mesh(new THREE.CylinderGeometry(0.75, 0.75, 1.9, 24, 1, true), mat);
+      this.scanRing.position.y = 0.95;
+      this.group.add(this.scanRing);
+    }
+    if (this.scanRing) this.scanRing.visible = active;
+  }
+
   public updateAnimation(delta: number, isMoving: boolean, camera?: THREE.Camera): void {
+    if (this.scanRing?.visible) {
+      this.scanTime += delta;
+      const pulse = 0.5 + 0.5 * Math.sin(this.scanTime * 6);
+      this.scanRing.scale.set(1 + pulse * 0.08, 0.15 + 0.85 * ((this.scanTime * 0.8) % 1), 1 + pulse * 0.08);
+      (this.scanRing.material as THREE.MeshBasicMaterial).opacity = 0.3 + pulse * 0.3;
+    }
     const auraMaterial = this.movementAura.material as THREE.MeshBasicMaterial;
     auraMaterial.opacity = THREE.MathUtils.damp(auraMaterial.opacity, isMoving ? 0.42 : 0, 9, delta);
     if (!this.isGhost) {
