@@ -19,18 +19,16 @@ import {
   Sparkles,
   Info,
   Dice5,
-  Shield,
-  Zap,
   Flame,
-  Award,
-  Compass,
   CheckCircle2,
   Clock,
   Radio,
 } from 'lucide-react';
 import {
   GameSettings,
+  BOT_FILL_TARGET,
   MIN_PLAYERS_TO_START,
+  maxImpostorsFor,
   MAX_PLAYERS_PER_LOBBY,
   PLAYER_COLORS,
   PLAYER_HATS,
@@ -44,13 +42,6 @@ interface LobbyProps {
   onLeave: () => void;
 }
 
-const SPECIALTY_TITLES = [
-  { id: 'cadet', name: 'Cadet', icon: Compass },
-  { id: 'engineer', name: 'Engineer', icon: Zap },
-  { id: 'security', name: 'Security Officer', icon: Shield },
-  { id: 'medic', name: 'Chief Medic', icon: Award },
-  { id: 'detective', name: 'Detective', icon: Sparkles },
-];
 
 export const LobbyView: React.FC<LobbyProps> = ({ onLeave }) => {
   const mountRef = useRef<HTMLDivElement>(null);
@@ -63,8 +54,6 @@ export const LobbyView: React.FC<LobbyProps> = ({ onLeave }) => {
   const [errorMessage, setErrorMessage] = useState('');
   const [startingCount, setStartingCount] = useState<number | null>(null);
 
-  // Cosmetic specialty badge (local preference)
-  const [specialty, setSpecialty] = useState(() => localStorage.getItem('impostor_specialty') || 'cadet');
 
   const socketId = net.getSocketId();
   const localPlayer = lobby?.players.find((p) => p.id === socketId);
@@ -251,8 +240,10 @@ export const LobbyView: React.FC<LobbyProps> = ({ onLeave }) => {
   };
 
   const humanCount = lobby?.players.length || 0;
+  const seatCount = Math.max(humanCount, lobby?.settings.fillWithBots !== false ? BOT_FILL_TARGET : 0);
+  const effectiveImpostors = Math.max(1, Math.min(lobby?.settings.impostorCount ?? 1, maxImpostorsFor(seatCount)));
   const botFill = lobby?.settings.fillWithBots !== false;
-  const botsToAdd = botFill ? Math.max(0, MIN_PLAYERS_TO_START - humanCount) : 0;
+  const botsToAdd = botFill ? Math.max(0, BOT_FILL_TARGET - humanCount) : 0;
   const canStartNormal = humanCount >= 1 && (botFill || humanCount >= MIN_PLAYERS_TO_START);
 
   const activeColor = PLAYER_COLORS.find((c) => c.id === localPlayer?.colorId) || PLAYER_COLORS[0];
@@ -481,36 +472,6 @@ export const LobbyView: React.FC<LobbyProps> = ({ onLeave }) => {
                 </div>
               </div>
 
-              {/* Specialty Role Badges */}
-              <div>
-                <span className="block text-xs font-black uppercase tracking-wider text-slate-400 mb-1.5">
-                  CREW ROLE BADGE
-                </span>
-                <div className="flex flex-wrap gap-1.5">
-                  {SPECIALTY_TITLES.map((t) => {
-                    const Icon = t.icon;
-                    const isSelected = specialty === t.id;
-                    return (
-                      <button
-                        key={t.id}
-                        onClick={() => {
-                          soundEngine.playClick();
-                          setSpecialty(t.id);
-                          localStorage.setItem('impostor_specialty', t.id);
-                        }}
-                        className={`py-1 px-2.5 rounded-lg text-[11px] font-bold flex items-center space-x-1.5 border transition-all cursor-pointer ${
-                          isSelected
-                            ? 'bg-purple-950/70 border-purple-400 text-purple-200'
-                            : 'bg-slate-900 border-slate-700 text-slate-400 hover:text-slate-200'
-                        }`}
-                      >
-                        <Icon className="w-3 h-3" />
-                        <span>{t.name}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
             </div>
           )}
 
@@ -646,6 +607,11 @@ export const LobbyView: React.FC<LobbyProps> = ({ onLeave }) => {
                     <span># OF IMPOSTORS</span>
                     <span className="text-red-400 font-black">{lobby?.settings.impostorCount}</span>
                   </div>
+                  {effectiveImpostors < (lobby?.settings.impostorCount ?? 1) && (
+                    <p className="text-[11px] font-bold text-amber-300">
+                      A {seatCount}-player match allows {effectiveImpostors} impostor{effectiveImpostors > 1 ? 's' : ''} ({maxImpostorsFor(7)} needs 7+, 3 needs 9+).
+                    </p>
+                  )}
                   {isHost ? (
                     <div className="flex space-x-2">
                       {[1, 2, 3].map((num) => (
@@ -882,6 +848,43 @@ export const LobbyView: React.FC<LobbyProps> = ({ onLeave }) => {
                     </button>
                   ) : (
                     <span>{lobby?.settings.visualTasks ? 'ON' : 'OFF'}</span>
+                  )}
+                </div>
+                <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800 flex items-center justify-between font-bold text-slate-300">
+                  <span>ANONYMOUS VOTES</span>
+                  {isHost ? (
+                    <button
+                      onClick={() => handleUpdateSetting('anonymousVotes', !lobby?.settings.anonymousVotes)}
+                      aria-pressed={!!lobby?.settings.anonymousVotes}
+                      className={`px-3 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                        lobby?.settings.anonymousVotes ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-300'
+                      }`}
+                    >
+                      {lobby?.settings.anonymousVotes ? 'ON' : 'OFF'}
+                    </button>
+                  ) : (
+                    <span>{lobby?.settings.anonymousVotes ? 'ON' : 'OFF'}</span>
+                  )}
+                </div>
+                <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800 flex items-center justify-between font-bold text-slate-300">
+                  <span>EMERGENCY MEETINGS</span>
+                  {isHost ? (
+                    <div className="flex gap-1" role="group" aria-label="Emergency meetings per player">
+                      {[0, 1, 2, 3].map((n) => (
+                        <button
+                          key={n}
+                          onClick={() => handleUpdateSetting('emergencyMeetings', n)}
+                          aria-pressed={lobby?.settings.emergencyMeetings === n}
+                          className={`w-8 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                            lobby?.settings.emergencyMeetings === n ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-300'
+                          }`}
+                        >
+                          {n}
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <span>{lobby?.settings.emergencyMeetings ?? 1}</span>
                   )}
                 </div>
                 <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800 flex items-center justify-between font-bold text-slate-300">

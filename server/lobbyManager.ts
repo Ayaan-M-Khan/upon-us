@@ -321,7 +321,7 @@ export class LobbyManager {
       return;
     }
 
-    // With bot fill on (default), any lobby can start: AI bots take the empty seats up to 4 players.
+    // With bot fill on (default), any lobby can start: AI bots top the match up to BOT_FILL_TARGET seats.
     if (!isTestMode && !lobby.settings.fillWithBots && lobby.players.size < MIN_PLAYERS_TO_START) {
       socket.emit(EVENTS.LOBBY_ERROR, {
         message: `At least ${MIN_PLAYERS_TO_START} players required to start (currently ${lobby.players.size}). Turn on bot fill to play with fewer.`,

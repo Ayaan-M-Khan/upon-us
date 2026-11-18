@@ -12,8 +12,9 @@ import type { AddressInfo } from 'net';
 import { io as ioClient, Socket } from 'socket.io-client';
 import { EVENTS, GameStateSnapshot, LobbyData } from '../shared/events';
 import { createGameServer } from '../server/index';
-import { BASE_PLAYER_SPEED, KILL_DISTANCE_M, REPORT_RANGE, TASK_RANGE } from '../shared/constants';
+import { BASE_PLAYER_SPEED, BOT_FILL_TARGET, KILL_DISTANCE_M, REPORT_RANGE, TASK_RANGE } from '../shared/constants';
 import { findPath } from '../shared/nav';
+import { lineIntersectsWalls } from '../shared/physics';
 
 let failures = 0;
 let passes = 0;
@@ -140,7 +141,8 @@ class Client {
 
     // Crew: report any body in range, otherwise work through the task list.
     if (me.isAlive) {
-      const body = (snap.bodies ?? []).find((b) => Math.hypot(b.x - me.x, b.z - me.z) <= REPORT_RANGE);
+      const body = (snap.bodies ?? []).find((b) => Math.hypot(b.x - me.x, b.z - me.z) <= REPORT_RANGE
+        && !lineIntersectsWalls(me.x, me.z, b.x, b.z).hit); // the real client also needs line of sight
       if (body) {
         this.emit(EVENTS.REPORT_BODY, { bodyId: body.id });
         this.stats.reports++;
@@ -263,7 +265,7 @@ async function main() {
   await A.waitFor(() => A.saw(EVENTS.GAME_STARTED), 'game started', 6000);
   await A.waitFor(() => A.snap && B2.snap, 'snapshots');
   check(!!A.snap && !!B2.snap, 'both humans receive snapshots');
-  check(Object.keys(A.snap!.players).length === 4, '2 humans + 2 bots seated');
+  check(Object.keys(A.snap!.players).length === BOT_FILL_TARGET, `2 humans + ${BOT_FILL_TARGET - 2} bots seated`);
   check(!!A.snap!.you && A.snap!.you.role !== undefined, 'private view present');
   check(!('role' in A.snap!.players[B2.id]), 'other players\' roles are not leaked in snapshots');
   check(A.snap!.taskProgress === undefined, 'Task Bar Updates: Never hides crew progress');
@@ -305,7 +307,7 @@ async function main() {
   console.log(`  -> A ${A.snap?.you?.role} ${JSON.stringify(A.stats)} | B ${B3.snap?.you?.role} ${JSON.stringify(B3.stats)}`);
   A.stopPlaying();
   B3.stopPlaying();
-  check(go?.players?.length === 4 && go.players.every((p: any) => p.role), 'game over reveals every role');
+  check(go?.players?.length === BOT_FILL_TARGET && go.players.every((p: any) => p.role), 'game over reveals every role');
   const meetingCount = new Set(
     A.events.filter((e) => e.name === EVENTS.STATE_SNAPSHOT && e.data.meeting).map((e) => e.data.meeting.callerName + e.data.meeting.reason + (e.data.meeting.bodyVictimName ?? ''))
   ).size;

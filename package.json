@@ -10,7 +10,9 @@
     "start": "tsx server.ts",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "test:mp": "tsx scripts/mp-smoke.ts"
+    "test:mp": "tsx scripts/mp-smoke.ts",
+    "test:map": "tsx scripts/map-audit.ts",
+    "sim:bots": "tsx scripts/bot-sim.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

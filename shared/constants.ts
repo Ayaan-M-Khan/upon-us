@@ -7,6 +7,15 @@ export const JOIN_CODE_LENGTH = 5;
 
 export const MAX_PLAYER_NAME_LENGTH = 10;
 export const MIN_PLAYERS_TO_START = 4;
+/** With bot fill on, bots top the match up to this many seats (5 = 1 impostor, 1 engineer, 3 crew: the most even match in simulation). */
+export const BOT_FILL_TARGET = 5;
+
+/** Impostor cap by match size: 1 under 7 players, 2 under 9, otherwise up to 3. */
+export function maxImpostorsFor(playerCount: number): number {
+  if (playerCount < 7) return 1;
+  if (playerCount < 9) return 2;
+  return 3;
+}
 export const MAX_PLAYERS_PER_LOBBY = 10;
 /** How long a disconnected player's seat is held during a match before they are removed. */
 export const RECONNECT_GRACE_PERIOD_MS = 60000;
@@ -80,7 +89,7 @@ export interface GameSettings {
   taskBarUpdates: TaskBarUpdateMode; // 'Always'
   visualTasks: boolean; // default true
   map: string; // 'The Skeld'
-  fillWithBots: boolean; // fill empty seats with AI bots so a game can start with fewer than 4 players
+  fillWithBots: boolean; // top the match up to BOT_FILL_TARGET seats with AI bots
 }
 
 export const DEFAULT_GAME_SETTINGS: GameSettings = {

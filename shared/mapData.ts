@@ -322,13 +322,6 @@ export const SPAWN_RADIUS = 4;
 export const EMERGENCY_BUTTON_POS = { x: 0, z: -18 };
 export const EMERGENCY_BUTTON_RANGE = 3.2;
 
-export const SABOTAGE_REPAIR_POINTS: Record<string, { x: number; z: number }> = {
-  reactor: { x: -40, z: 0 },
-  o2: { x: 24, z: -9 },
-  lights: { x: -20, z: 17 },
-  comms: { x: 21, z: 24 },
-};
-
 export function getSpawnPosition(playerIndex: number, totalPlayers: number = 10): { x: number; z: number } {
   const angle = (playerIndex / Math.max(totalPlayers, 1)) * Math.PI * 2;
   return {
@@ -356,7 +349,7 @@ const ventGroups: { room: string; x: number; z: number; id: string }[][] = [
     { id: 'vent_electrical', room: 'Electrical', x: -24, z: 18 },
   ],
   [
-    { id: 'vent_cafeteria', room: 'Cafeteria', x: 5, z: -24 },
+    { id: 'vent_cafeteria', room: 'Cafeteria', x: 10, z: -19.6 }, // open floor by the east door (was under a dining table)
     { id: 'vent_admin', room: 'Admin', x: 13, z: 1 },
   ],
   [

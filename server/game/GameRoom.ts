@@ -2,7 +2,7 @@
  * Impostor Protocol - Game Room
  * Server-authoritative match simulation at 20 Hz:
  *   roles, tasks, kills, bodies, vents, emergency meetings, voting, win conditions,
- *   and AI bots that fill empty seats so a game can start with fewer than 4 humans.
+ *   and AI bots that fill empty seats so a game can start with any number of humans.
  */
 
 import { Server } from 'socket.io';
@@ -14,16 +14,18 @@ import {
   GameSettings,
   INITIAL_KILL_COOLDOWN_MS,
   KILL_DISTANCE_M,
+  LIGHTS_OUT_VISION_FACTOR,
   MAX_CHAT_LENGTH,
   MEETING_EJECTION_MS,
   MEETING_INTRO_MS,
   MEETING_RESULTS_MS,
-  MIN_PLAYERS_TO_START,
+  BOT_FILL_TARGET,
   PLAYER_COLORS,
   REPORT_RANGE,
   ROLE_REVEAL_MS,
   TASK_RANGE,
   VENT_RANGE,
+  VISION_BASE_M,
   sanitizePlayerName,
 } from '../../shared/constants';
 import {
@@ -84,6 +86,16 @@ interface BotBrain {
   lastPos: Pt;
   stuckSince: number;
   repairType: SabotageType | null;
+  /** Recent sightings of other players (who, where, when) used to reason about bodies. */
+  sightings: { id: string; x: number; z: number; at: number }[];
+  lastSightAt: number;
+  /** Suspicion score per player id; > ~35 is enough to vote them out. */
+  sus: Map<string, number>;
+  /** Room the bot was in when the last meeting was called (it is teleported to the table). */
+  roomBeforeMeeting: string;
+  /** Who this bot's pending chat line accuses, and how persuasive it is. */
+  accuseId: string | null;
+  accuseWeight: number;
 }
 
 interface GamePlayer extends PlayerSnapshot {
@@ -104,6 +116,7 @@ interface GamePlayer extends PlayerSnapshot {
 interface Body extends BodyView {
   killerId: string;
   room: string;
+  killedAt: number;
 }
 
 interface Meeting {
@@ -161,7 +174,7 @@ export class GameRoom {
     const seats: { id: string; name: string; colorId: string; hatId: string; isHost: boolean; isBot: boolean; disconnected?: boolean }[] =
       lobbyPlayers.map((lp) => ({ ...lp, isBot: false }));
 
-    const botsNeeded = settings.fillWithBots ? Math.max(0, MIN_PLAYERS_TO_START - seats.length) : 0;
+    const botsNeeded = settings.fillWithBots ? Math.max(0, BOT_FILL_TARGET - seats.length) : 0;
     const usedColors = new Set(seats.map((s) => s.colorId));
     const usedNames = new Set(seats.map((s) => s.name));
     const freeColors = PLAYER_COLORS.filter((c) => !usedColors.has(c.id));
@@ -344,6 +357,11 @@ export class GameRoom {
       const brain = other.brain;
       if (!brain) continue;
       if (brain.suspectId === oldId) brain.suspectId = newId;
+      if (brain.sus.has(oldId)) {
+        brain.sus.set(newId, brain.sus.get(oldId)!);
+        brain.sus.delete(oldId);
+      }
+      for (const sighting of brain.sightings) if (sighting.id === oldId) sighting.id = newId;
       if (brain.targetId === oldId) brain.targetId = newId;
     }
   }
@@ -411,6 +429,7 @@ export class GameRoom {
     if (this.stateMachine.currentState !== GAME_STATES.PLAYING) return;
     if (p.role === 'engineer' && Date.now() < p.engineerVentReadyAt) return;
     if (Math.hypot(p.x - vent.x, p.z - vent.z) > VENT_RANGE + 0.6) return;
+    if (p.role === 'impostor') this.botsWitness(p, 90);
     p.ventEnteredAt = Date.now();
     p.ventId = ventId;
     p.inVent = true;
@@ -439,6 +458,7 @@ export class GameRoom {
     const p = this.players.get(id);
     if (!p || !p.ventId) return;
     const now = Date.now();
+    if (p.role === 'impostor') this.botsWitness(p, 90);
     p.killReadyAt = now + Math.max(0, p.killReadyAt - (p.ventEnteredAt ?? now));
     p.ventEnteredAt = undefined;
     p.ventId = null;
@@ -472,6 +492,7 @@ export class GameRoom {
     const text = String(rawText || '').trim().slice(0, MAX_CHAT_LENGTH);
     if (!text) return;
     this.broadcastChat(p, text);
+    this.hearAccusation(p, text, 14);
   }
 
   public triggerSabotage(playerId: string, type: SabotageType, room?: string): boolean {
@@ -722,6 +743,7 @@ export class GameRoom {
       z: victim.z,
       killerId: killer.id,
       room: victim.room,
+      killedAt: Date.now(),
     });
 
     killer.killReadyAt = Date.now() + this.settings.killCooldown * 1000;
@@ -729,9 +751,9 @@ export class GameRoom {
     // Bots that saw it remember who did it.
     for (const w of this.players.values()) {
       if (!w.isBot || !w.isAlive || w.role === 'impostor' || w.id === victim.id) continue;
-      const dist = Math.hypot(w.x - victim.x, w.z - victim.z);
-      if (dist < 10 && !lineIntersectsWalls(w.x, w.z, victim.x, victim.z).hit) {
+      if (this.canSee(w, victim, this.sightRange(w))) {
         w.brain!.suspectId = killer.id;
+        this.addSus(w, killer.id, 100);
       }
     }
 
@@ -785,6 +807,12 @@ export class GameRoom {
       bodyRoom: body?.room,
       votes: new Map(),
     };
+    for (const p of this.players.values()) if (p.brain) p.brain.roomBeforeMeeting = p.room;
+    if (body) {
+      for (const p of this.players.values()) {
+        if (p.isBot && p.isAlive && p.role !== 'impostor') this.assessBody(p, body, caller);
+      }
+    }
     this.bodies.clear();
     this.meetingTaskProgress = this.taskProgress();
     this.stateMachine.transitionTo(GAME_STATES.MEETING);
@@ -861,7 +889,9 @@ export class GameRoom {
     m.phase = 'VOTING';
     m.endsAt = now + this.settings.votingTime * 1000;
     for (const p of this.players.values()) {
-      if (p.isBot) p.brain!.voteAt = now + 2500 + Math.random() * 8000;
+      if (!p.isBot) continue;
+      const decided = p.role !== 'impostor' && (!!p.brain!.suspectId || !!this.topSuspect(p));
+      p.brain!.voteAt = decided ? now + 2000 + Math.random() * 4000 : now + 7000 + Math.random() * 9000;
     }
   }
 
@@ -935,6 +965,7 @@ export class GameRoom {
         p.brain.mode = 'idle';
         p.brain.waitUntil = now + 1000 + Math.random() * 2000;
         p.brain.suspectId = null;
+        for (const [id, v] of p.brain.sus) p.brain.sus.set(id, v * 0.5);
       }
     }
   }
@@ -953,6 +984,23 @@ export class GameRoom {
       voted: [...m.votes.keys()],
       results: m.results,
     };
+  }
+
+  /** Crew bots weigh accusations made in meeting chat, unless they already suspect the speaker. */
+  private hearAccusation(speaker: GamePlayer, text: string, weight: number): void {
+    if (!speaker.isAlive) return;
+    const norm = (t: string) => ` ${t.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()} `;
+    const said = norm(text);
+    const named = [...this.players.values()].filter((p) => p.isAlive && p.id !== speaker.id
+      && norm(p.name).trim() && said.includes(norm(p.name)));
+    if (named.length !== 1) return; // ambiguous or no accusation
+    const accused = named[0];
+    for (const bot of this.players.values()) {
+      if (!bot.isBot || !bot.isAlive || bot.role === 'impostor' || bot.id === speaker.id || bot.id === accused.id) continue;
+      const distrust = bot.brain!.sus.get(speaker.id) ?? 0;
+      if (distrust >= 25) continue;
+      this.addSus(bot, accused.id, weight);
+    }
   }
 
   private broadcastChat(sender: GamePlayer, text: string): void {
@@ -1074,6 +1122,12 @@ export class GameRoom {
       lastPos: { ...pos },
       stuckSince: Date.now(),
       repairType: null,
+      sightings: [],
+      lastSightAt: 0,
+      sus: new Map(),
+      roomBeforeMeeting: '',
+      accuseId: null,
+      accuseWeight: 0,
     };
   }
 
@@ -1162,6 +1216,7 @@ export class GameRoom {
 
   private botThink(bot: GamePlayer, now: number): void {
     const b = bot.brain!;
+    if (bot.isAlive && now - b.lastSightAt >= 500) this.recordSightings(bot, now);
 
     const activeSab = this.sabotageManager.getActiveSabotage();
     const shouldRepair = activeSab && bot.isAlive && bot.role !== 'impostor';
@@ -1172,7 +1227,7 @@ export class GameRoom {
       let best = nearest ? Math.hypot(bot.x - nearest.x, bot.z - nearest.z) : Infinity;
       for (const body of this.bodies.values()) {
         const distance = Math.hypot(bot.x - body.x, bot.z - body.z);
-        if (distance >= best || !this.canSee(bot, body, 11)) continue;
+        if (distance >= best || !this.canSee(bot, body, this.sightRange(bot))) continue;
         if (bot.role === 'impostor' && (body.killerId === bot.id || Math.random() >= 0.2)) continue;
         best = distance;
         nearest = body;
@@ -1211,7 +1266,7 @@ export class GameRoom {
 
     // Sabotage remains available while hunting and after an impostor becomes a ghost.
     if (!activeSab && bot.role === 'impostor' && this.sabotageManager.getCooldownRemainingSecs(now) === 0) {
-      if (Math.random() < 0.04) {
+      if (Math.random() < 0.012) {
         const types: SabotageType[] = ['reactor', 'o2', 'lights', 'comms'];
         const chosen = types[Math.floor(Math.random() * types.length)];
         this.triggerSabotage(bot.id, chosen);
@@ -1244,6 +1299,19 @@ export class GameRoom {
             this.setGoal(bot, { x: victim.x, z: victim.z });
           }
           return;
+        }
+        // Nobody killable in view: stalk toward the most recently seen crewmate instead of wandering aimlessly.
+        if (b.mode !== 'chase' && (b.mode !== 'wander' || !b.path.length)) {
+          const lead = [...b.sightings].reverse().find((s) => {
+            const t = this.players.get(s.id);
+            return t && t.isAlive && t.role !== 'impostor' && now - s.at < 15000
+              && Math.hypot(s.x - bot.x, s.z - bot.z) > 3;
+          });
+          if (lead) {
+            b.mode = 'wander';
+            this.setGoal(bot, { x: lead.x, z: lead.z }, 2);
+            return;
+          }
         }
       }
       if (b.mode === 'chase') {
@@ -1348,7 +1416,7 @@ export class GameRoom {
       let witnesses = 0;
       for (const w of this.players.values()) {
         if (w.id === c.id || w.id === bot.id || !w.isAlive || w.role === 'impostor') continue;
-        if (this.canSee(w, c, 11)) witnesses++;
+        if (this.canSee(w, c, this.sightRange(w))) witnesses++;
       }
       if (witnesses > 0) continue;
       const d = Math.hypot(bot.x - c.x, bot.z - c.z);
@@ -1366,13 +1434,105 @@ export class GameRoom {
     const others = [...this.players.values()].filter((p) => p.isAlive && p.id !== bot.id);
     if (others.length === 0) return 'skip';
 
+    // Current leader of the votes already cast (bots vote at staggered times, so they can bandwagon).
+    const m = this.meeting;
+    const tally = new Map<string, number>();
+    if (m) for (const t of m.votes.values()) if (t !== 'skip') tally.set(t, (tally.get(t) || 0) + 1);
+    let leader: string | null = null;
+    let leaderVotes = 0;
+    for (const [id, n] of tally) if (n > leaderVotes) [leader, leaderVotes] = [id, n];
+    const voters = [...this.players.values()].filter((p) => p.isAlive).length;
+    const strongLead = leader && leader !== bot.id && others.some((p) => p.id === leader)
+      && leaderVotes >= Math.max(2, Math.ceil(voters / 3));
+
     if (bot.role === 'impostor') {
-      const targets = others.filter((p) => p.role !== 'impostor');
-      if (targets.length && Math.random() < 0.5) return targets[Math.floor(Math.random() * targets.length)].id;
+      const crew = others.filter((p) => p.role !== 'impostor');
+      // Pile onto a crewmate that is already being voted out; otherwise sometimes push a random one.
+      if (strongLead && crew.some((p) => p.id === leader)) return leader!;
+      if (crew.length && Math.random() < 0.35) return crew[Math.floor(Math.random() * crew.length)].id;
       return 'skip';
     }
     if (b.suspectId && others.some((p) => p.id === b.suspectId)) return b.suspectId;
+    let top: string | null = null;
+    let topScore = 0;
+    for (const p of others) {
+      const v = b.sus.get(p.id) ?? 0;
+      if (v > topScore) [top, topScore] = [p.id, v];
+    }
+    let second = 0;
+    for (const p of others) {
+      const v = b.sus.get(p.id) ?? 0;
+      if (p.id !== top && v > second) second = v;
+    }
+    if (top && (topScore >= 35 || (topScore >= 22 && topScore - second >= 12))) return top;
+    // No strong opinion: join a clear majority unless we trust that player.
+    if (strongLead && (b.sus.get(leader!) ?? 0) > -10 && Math.random() < 0.6) return leader!;
     return 'skip';
+  }
+
+  /** How far this player can see right now (vision setting, role, lights sabotage). */
+  private sightRange(p: GamePlayer): number {
+    const impostor = p.role === 'impostor';
+    let r = VISION_BASE_M * (impostor ? this.settings.impostorVision : this.settings.crewmateVision);
+    if (!impostor && this.sabotageManager.isLightsOut()) r *= LIGHTS_OUT_VISION_FACTOR;
+    return Math.max(2.5, r);
+  }
+
+  private addSus(bot: GamePlayer, id: string, amount: number): void {
+    if (!bot.brain || id === bot.id) return;
+    bot.brain.sus.set(id, (bot.brain.sus.get(id) ?? 0) + amount);
+  }
+
+  /** Crew bots that can see `actor` right now raise their suspicion of it. */
+  private botsWitness(actor: GamePlayer, amount: number): void {
+    for (const w of this.players.values()) {
+      if (!w.isBot || !w.isAlive || w.role === 'impostor' || w.id === actor.id) continue;
+      if (this.canSee(w, actor, this.sightRange(w))) this.addSus(w, actor.id, amount);
+    }
+  }
+
+  private recordSightings(bot: GamePlayer, now: number): void {
+    const b = bot.brain!;
+    b.lastSightAt = now;
+    const range = this.sightRange(bot);
+    for (const o of this.players.values()) {
+      if (o.id === bot.id || !o.isAlive || o.ventId) continue;
+      if (Math.hypot(o.x - bot.x, o.z - bot.z) > range || !this.canSee(bot, o, range)) continue;
+      b.sightings.push({ id: o.id, x: o.x, z: o.z, at: now });
+    }
+    // Keep roughly the last 40 s.
+    while (b.sightings.length && now - b.sightings[0].at > 40000) b.sightings.shift();
+  }
+
+  /** A body was reported: suspect whoever this bot saw near it (or with the victim) around the time of death. */
+  private assessBody(bot: GamePlayer, body: Body, reporter: GamePlayer): void {
+    const b = bot.brain!;
+    const best = new Map<string, number>();
+    const bump = (id: string, v: number) => best.set(id, Math.max(best.get(id) ?? 0, v));
+    const victimSeen = b.sightings.filter((s) => s.id === body.id);
+    for (const s of b.sightings) {
+      if (s.id === body.id || s.id === bot.id) continue;
+      const dt = Math.abs(s.at - body.killedAt);
+      if (dt > 25000) continue;
+      const d = Math.hypot(s.x - body.x, s.z - body.z);
+      if (d <= 10) bump(s.id, 50 * (1 - dt / 25000) * (1 - d / 14));
+      // Seen right next to the victim shortly before the death.
+      if (s.at <= body.killedAt && victimSeen.some((v) => Math.abs(v.at - s.at) < 1500
+        && Math.hypot(v.x - s.x, v.z - s.z) < 6)) bump(s.id, 30 * (1 - dt / 25000));
+    }
+    for (const [id, v] of best) this.addSus(bot, id, v + Math.random() * 8);
+    // Reporting a body is mildly reassuring.
+    if (reporter.id !== bot.id) this.addSus(bot, reporter.id, -8);
+  }
+
+  private topSuspect(bot: GamePlayer): { player: GamePlayer; score: number } | null {
+    let best: { player: GamePlayer; score: number } | null = null;
+    for (const [id, score] of bot.brain!.sus) {
+      const p = this.players.get(id);
+      if (!p || !p.isAlive || score < 35) continue;
+      if (!best || score > best.score) best = { player: p, score };
+    }
+    return best;
   }
 
   private scheduleBotChat(m: Meeting, now: number): void {
@@ -1380,14 +1540,31 @@ export class GameRoom {
       if (!p.isBot || !p.isAlive) continue;
       const b = p.brain!;
       b.chatLine = null;
+      b.accuseId = null;
       b.chatAt = now + 1500 + Math.random() * 5000;
       if (m.callerId === p.id) {
         b.chatLine = m.reason === 'body' ? `I found a body in ${m.bodyRoom || 'the ship'}!` : 'I called an emergency meeting.';
-      } else if (b.suspectId) {
-        const sus = this.players.get(b.suspectId);
-        if (sus) b.chatLine = `I saw ${sus.name} kill someone!`;
-      } else if (Math.random() < 0.25) {
-        b.chatLine = p.role !== 'impostor' ? `I was doing tasks in ${p.room}.` : `I was in ${p.room}, nothing weird.`;
+      } else if (b.suspectId && this.players.get(b.suspectId)?.isAlive) {
+        b.chatLine = `I saw ${this.players.get(b.suspectId)!.name} kill someone!`;
+        b.accuseId = b.suspectId;
+        b.accuseWeight = 30;
+      } else if (p.role !== 'impostor' && this.topSuspect(p)) {
+        const t = this.topSuspect(p)!;
+        b.chatLine = t.score >= 80 ? `I'm sure it's ${t.player.name}. Vote them.`
+          : `${t.player.name} was near ${m.bodyRoom || 'there'} right before. Sus.`;
+        b.accuseId = t.player.id;
+        b.accuseWeight = Math.min(25, t.score * 0.4);
+      } else if (p.role === 'impostor' && Math.random() < 0.3) {
+        const crew = [...this.players.values()].filter((o) => o.isAlive && o.role !== 'impostor' && o.id !== m.callerId);
+        if (crew.length) {
+          const framed = crew[Math.floor(Math.random() * crew.length)];
+          b.chatLine = `${framed.name} has been acting weird.`;
+          b.accuseId = framed.id;
+          b.accuseWeight = 10;
+        }
+      } else if (Math.random() < 0.35) {
+        const where = b.roomBeforeMeeting || 'the ship';
+        b.chatLine = p.role !== 'impostor' ? `I was doing tasks in ${where}.` : `I was in ${where}, nothing weird.`;
       }
     }
   }
@@ -1398,7 +1575,12 @@ export class GameRoom {
       const b = p.brain!;
       if (b.chatLine && now >= b.chatAt) {
         this.broadcastChat(p, b.chatLine);
+        if (b.accuseId) {
+          const accused = this.players.get(b.accuseId);
+          if (accused) this.hearAccusation(p, accused.name, b.accuseWeight);
+        }
         b.chatLine = null;
+        b.accuseId = null;
       }
     }
   }

@@ -310,7 +310,7 @@ export const MainMenu: React.FC<MenuProps> = ({ onLobbyJoined, initialJoinCode }
               <div className="p-3.5 bg-amber-950/40 border border-amber-800/40 rounded-2xl">
                 <h4 className="font-black text-amber-300 mb-1">🛠️ ENGINEER ROLE</h4>
                 <p className="text-xs text-slate-300 leading-relaxed">
-                  Engineers are crewmates who can use ship vents for 6 seconds at a time. Their vent access recharges for 20 seconds after exiting.
+                  In matches with 5+ players, one crewmate is an Engineer: they can use ship vents for 6 seconds at a time, and vent access recharges for 20 seconds after exiting.
                 </p>
               </div>
 

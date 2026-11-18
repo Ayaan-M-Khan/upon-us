@@ -3,6 +3,7 @@
  */
 
 import type { Role } from '../../shared/events';
+import { maxImpostorsFor } from '../../shared/constants';
 
 export type { Role };
 
@@ -12,12 +13,7 @@ export interface PlayerRoleAssignment {
   isAlive: boolean;
 }
 
-/** Same limits as the lobby: 1 impostor under 7 players, 2 under 9, otherwise up to 3. */
-export function maxImpostorsFor(playerCount: number): number {
-  if (playerCount < 7) return 1;
-  if (playerCount < 9) return 2;
-  return 3;
-}
+export { maxImpostorsFor };
 
 export function assignRoles(playerIds: string[], impostorCount: number): Map<string, PlayerRoleAssignment> {
   const assignments = new Map<string, PlayerRoleAssignment>();

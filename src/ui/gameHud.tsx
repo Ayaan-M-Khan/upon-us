@@ -25,7 +25,7 @@ import {
 } from 'lucide-react';
 import { GAME_STATES } from '../../shared/constants';
 import { GameStateSnapshot } from '../../shared/events';
-import { MAP_BOUNDS, MAP_CORRIDORS, MAP_ROOMS_DETAIL, MAP_VENTS, SABOTAGE_REPAIR_POINTS, SECURITY_CAMERAS } from '../../shared/mapData';
+import { MAP_BOUNDS, MAP_CORRIDORS, MAP_ROOMS_DETAIL, MAP_VENTS, SECURITY_CAMERAS } from '../../shared/mapData';
 import { soundEngine } from '../audio';
 import { net } from '../net';
 import { CameraViewMode } from '../render/cameraController';
@@ -838,16 +838,20 @@ export const GameHud: React.FC<GameHudProps> = ({
                 {canVent &&
                   MAP_VENTS.map((v) => <rect key={v.id} x={v.x - 0.8} y={v.z - 0.8} width="1.6" height="1.6" fill={isEngineer ? '#fbbf24' : '#ef4444'} opacity="0.9" />)}
 
-                {snapshot?.sabotage && (
+                {/* Every unresolved repair station of the active sabotage (O2 and reactor have two) */}
+                {snapshot?.sabotage?.parts.filter((part) => !part.resolved).map((part) => (
                   <circle
-                    cx={SABOTAGE_REPAIR_POINTS[snapshot.sabotage.type].x}
-                    cy={SABOTAGE_REPAIR_POINTS[snapshot.sabotage.type].z}
+                    key={`sab-${part.id}`}
+                    cx={part.x}
+                    cy={part.z}
                     r="1.5"
                     fill="#fb7185"
                     stroke="#fff"
                     strokeWidth="0.4"
-                  />
-                )}
+                  >
+                    <title>{part.name}</title>
+                  </circle>
+                ))}
 
                 {/* Task locations (yellow) */}
                 {!commsJammed && myTasks

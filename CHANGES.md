@@ -29,3 +29,13 @@ Not done yet: sabotages (button is shown disabled), fog-of-war / vision radius, 
 - **Tests**: `npm run test:mp` boots the server in-process and drives scripted clients through join, kick, ready, malformed payloads, lobby + mid-match disconnect/rejoin, seat expiry, host migration and a full match played over the socket protocol to game over and back to the lobby.
 
 Prop collision (cafeteria tables, reactor, etc.) was already in place via `MAP_OBSTACLES`; the "not done yet" note above is out of date.
+
+## Update 4 — bot AI, roles and mechanics
+
+- **Bot AI reasons now.** Bots remember who they saw where (last ~40 s). When a body is reported, crew bots suspect whoever was near it or with the victim around the time of death, say so in meeting chat ("Nova was near Cafeteria right before. Sus."), and vote on it. Accusations, including a human naming a player in chat, sway bots that don't distrust the speaker; undecided bots vote later and can follow a clear majority; seeing someone vent is near-proof. Impostor bots stalk toward recently seen crew, frame people in chat, pile onto crewmates already being voted, and sabotage less compulsively. Bots spot bodies and witnesses with the same sight radius as players (vision settings, lights). Meeting chat reports the room a bot was actually in, not the meeting table.
+  - Simulation (`npm run sim:bots -- <games> <players> [impostors]`): 4-player crew win rate went from 7 % to ~20–33 %; at 8 players crew used to win 100 % on tasks without ever ejecting an impostor, and impostors now get voted out.
+- **Bots fill to 5 seats** (was 4): the most even match in simulation, and the size at which the **Engineer** role is assigned — previously a solo or small lobby never got an Engineer.
+- Removed the lobby's "Crew Role Badge" picker: it advertised Engineer / Security Officer / Medic / Detective but was stored only in your own browser and did nothing in game.
+- Lobby settings: added **Anonymous Votes** and **Emergency Meetings** controls (they existed but had no control), and the impostor picker says when the match size caps the count.
+- **Map**: the Cafeteria vent was inside a dining table's collision; moved to open floor. The in-game map now marks every unresolved repair station of the active sabotage (O2/reactor have two) instead of one hard-coded, partly wrong point.
+- `npm run test:map` checks every task spot, repair station, vent and the emergency button is on floor, in its room and reachable from spawn.
