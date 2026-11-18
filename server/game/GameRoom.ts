@@ -68,7 +68,7 @@ interface TaskState {
 }
 
 interface BotBrain {
-  mode: 'idle' | 'task' | 'work' | 'repair' | 'wander' | 'body' | 'chase' | 'flee';
+  mode: 'idle' | 'task' | 'work' | 'repair' | 'wander' | 'body' | 'chase' | 'flee' | 'button';
   path: Pt[];
   goal: Pt | null;
   goalRange: number;
@@ -96,6 +96,10 @@ interface BotBrain {
   /** Who this bot's pending chat line accuses, and how persuasive it is. */
   accuseId: string | null;
   accuseWeight: number;
+  /** Impostor escape plan: vent to dive into after a kill, then when to hop and when to climb out. */
+  ventPlan: string | null;
+  ventHopAt: number;
+  ventExitAt: number;
 }
 
 interface GamePlayer extends PlayerSnapshot {
@@ -835,6 +839,8 @@ export class GameRoom {
       if (p.brain) {
         p.brain.path = [];
         p.brain.mode = 'idle';
+        p.brain.ventPlan = null;
+        p.brain.ventHopAt = 0;
       }
     }
   }
@@ -1128,6 +1134,9 @@ export class GameRoom {
       roomBeforeMeeting: '',
       accuseId: null,
       accuseWeight: 0,
+      ventPlan: null,
+      ventHopAt: 0,
+      ventExitAt: 0,
     };
   }
 
@@ -1185,6 +1194,22 @@ export class GameRoom {
 
   private botUpdate(bot: GamePlayer, now: number, dt: number): void {
     const b = bot.brain!;
+    if (bot.ventId) {
+      bot.isMoving = false;
+      if (b.ventHopAt && now >= b.ventHopAt) {
+        const vent = MAP_VENTS.find((v) => v.id === bot.ventId);
+        const dest = vent?.connectedTo[Math.floor(Math.random() * vent.connectedTo.length)];
+        if (dest) this.ventMove(bot.id, dest);
+        b.ventHopAt = 0;
+      } else if (!b.ventHopAt && now >= b.ventExitAt) {
+        this.ventExit(bot.id);
+        b.ventPlan = null;
+        b.mode = 'idle';
+        b.path = [];
+        b.waitUntil = now + 500;
+      }
+      return;
+    }
     this.botThink(bot, now);
     if (this.stateMachine.currentState !== GAME_STATES.PLAYING) return; // a meeting or game over just started
     this.botMove(bot, dt);
@@ -1276,8 +1301,21 @@ export class GameRoom {
     // --- 2. Impostor hunting ---
     if (bot.role === 'impostor' && bot.isAlive) {
       if (b.mode === 'flee') {
-        if (now >= b.fleeUntil || b.path.length === 0) b.mode = 'idle';
-        else return;
+        const vent = b.ventPlan ? MAP_VENTS.find((v) => v.id === b.ventPlan) : undefined;
+        if (vent && Math.hypot(vent.x - bot.x, vent.z - bot.z) <= VENT_RANGE) {
+          this.ventEnter(bot.id, vent.id);
+          if (bot.ventId) {
+            b.path = [];
+            b.ventHopAt = now + 1200 + Math.random() * 1500;
+            b.ventExitAt = b.ventHopAt + 800 + Math.random() * 1200;
+            return;
+          }
+          b.ventPlan = null;
+        }
+        if (now >= b.fleeUntil + (b.ventPlan ? 4000 : 0) || b.path.length === 0) {
+          b.mode = 'idle';
+          b.ventPlan = null;
+        } else return;
       }
       if (now >= bot.killReadyAt) {
         const victim = this.pickVictim(bot, b.mode === 'chase' ? b.targetId : null);
@@ -1289,7 +1327,16 @@ export class GameRoom {
             b.mode = 'flee';
             b.fleeUntil = now + 4000;
             b.targetId = null;
-            this.setGoal(bot, this.randomStation());
+            const escape = MAP_VENTS
+              .map((v) => ({ v, d: Math.hypot(v.x - bot.x, v.z - bot.z) }))
+              .filter(({ d }) => d < 9)
+              .sort((a, c) => a.d - c.d)[0];
+            if (escape && Math.random() < 0.7) {
+              b.ventPlan = escape.v.id;
+              this.setGoal(bot, escape.v, VENT_RANGE - 0.4);
+            } else {
+              this.setGoal(bot, this.randomStation());
+            }
             return;
           }
           const goalStale = !b.goal || Math.hypot(b.goal.x - victim.x, b.goal.z - victim.z) > 1.5;
@@ -1355,6 +1402,28 @@ export class GameRoom {
       }
     }
     if (b.mode === 'repair') {
+      b.mode = 'idle';
+      b.path = [];
+    }
+
+    // --- 2.75 Sure about someone (saw a kill or a vent) and no body to report: press the button ---
+    if (bot.role !== 'impostor' && bot.isAlive && bot.emergenciesLeft > 0 && !activeSab && now >= this.emergencyReadyAt) {
+      const witnessed = b.suspectId ? this.players.get(b.suspectId) : undefined;
+      const sure = (witnessed?.isAlive ?? false) || (this.topSuspect(bot)?.score ?? 0) >= 80;
+      if (sure) {
+        const d = Math.hypot(bot.x - EMERGENCY_BUTTON_POS.x, bot.z - EMERGENCY_BUTTON_POS.z);
+        if (d <= EMERGENCY_BUTTON_RANGE + 0.7) {
+          this.callEmergency(bot.id);
+          if (this.meeting) return;
+        } else if (b.mode !== 'button' || !b.path.length) {
+          b.mode = 'button';
+          b.currentTask = null;
+          this.setGoal(bot, EMERGENCY_BUTTON_POS, EMERGENCY_BUTTON_RANGE + 0.5);
+        }
+        if (b.mode === 'button') return;
+      }
+    }
+    if (b.mode === 'button') {
       b.mode = 'idle';
       b.path = [];
     }

@@ -35,6 +35,7 @@ export class DropshipLobbyScene {
   private cameraAngleH: number = 0; // Horizontal orbit
   private cameraAngleV: number = 0.45; // Vertical pitch (~25 degrees)
   private cameraDistance: number = 6.0;
+  private mobileFramed = false;
   private isPointerDown: boolean = false;
   private lastPointerX: number = 0;
   private lastPointerY: number = 0;
@@ -568,8 +569,17 @@ export class DropshipLobbyScene {
     // On desktop the crew panel covers the right ~27rem: shift the picture so the crew stays
     // centred in the free area instead of hiding behind the panel.
     const panel = width >= 768 ? 432 : 0;
-    if (panel > 0) this.camera.setViewOffset(width, height, panel / 2, 0, width, height);
-    else this.camera.clearViewOffset();
+    if (panel > 0) {
+      this.camera.setViewOffset(width, height, panel / 2, 0, width, height);
+    } else {
+      // On phones the panel is a bottom sheet covering roughly the lower 60%: lift the crew into the
+      // visible strip at the top, and pull the camera back a little so the whole bean fits there.
+      this.camera.setViewOffset(width, height, 0, height * 0.27, width, height);
+      if (!this.mobileFramed) {
+        this.cameraDistance = Math.max(this.cameraDistance, 8.5);
+        this.mobileFramed = true;
+      }
+    }
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(width, height);
   };

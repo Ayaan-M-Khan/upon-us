@@ -39,3 +39,10 @@ Prop collision (cafeteria tables, reactor, etc.) was already in place via `MAP_O
 - Lobby settings: added **Anonymous Votes** and **Emergency Meetings** controls (they existed but had no control), and the impostor picker says when the match size caps the count.
 - **Map**: the Cafeteria vent was inside a dining table's collision; moved to open floor. The in-game map now marks every unresolved repair station of the active sabotage (O2/reactor have two) instead of one hard-coded, partly wrong point.
 - `npm run test:map` checks every task spot, repair station, vent and the emergency button is on floor, in its room and reachable from spawn.
+
+## Update 5 — bot tactics and phone layout
+
+- **Impostor bots vent-escape**: after a kill they usually dive into a vent within ~9 m, hop once, and climb out elsewhere. Crew bots who see it treat it as near-proof.
+- **Crew bots call emergency meetings** when they are sure about someone (saw a kill or a vent) and have no body to report.
+- Simulated balance (crew win rate): 4 players ~55 %, 5 players ~50 %, 8 players with 2 impostors ~50 %; 6 players still leans crew (~80 %). `npm run sim:bots` now also reports emergency meetings and bot vent use.
+- **Phone lobby**: the header no longer pushes the Leave button off-screen, and the camera lifts the crew above the bottom sheet so your character is visible.

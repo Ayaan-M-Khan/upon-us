@@ -20,6 +20,8 @@ let timeouts = 0;
 const sabotages: number[] = [];
 let stuckReports = 0;
 let ejectedImp = 0;
+let emergencies = 0;
+let vents = 0;
 let ejectedCrew = 0;
 
 for (let g = 0; g < games; g++) {
@@ -48,6 +50,7 @@ for (let g = 0; g < games; g++) {
   const origMeeting = r.startMeeting.bind(r);
   r.startMeeting = (...a: any[]) => {
     if (!r.meeting) meetings++;
+    if (!r.meeting && a[1] === 'emergency') emergencies++;
     origMeeting(...a);
   };
   const origEject = r.applyEjection.bind(r);
@@ -58,6 +61,11 @@ for (let g = 0; g < games; g++) {
       if (role === 'impostor') ejectedImp++; else ejectedCrew++;
     }
     origEject(m);
+  };
+  const origVent = r.ventEnter.bind(r);
+  r.ventEnter = (id: string, v: string) => {
+    origVent(id, v);
+    if (room.players.get(id)?.ventId) vents++;
   };
   let sabCount = 0;
   const origTrigger = r.triggerSabotage.bind(r);
@@ -103,4 +111,4 @@ for (let g = 0; g < games; g++) {
   sabotages.push(sabCount);
 }
 const finished = games - timeouts;
-console.log(`\noutcomes ${JSON.stringify(outcomes)}, timeouts ${timeouts}, avg length ${finished ? (totalMs / finished / 1000).toFixed(0) : '-'}s, avg sabotages ${(sabotages.reduce((a, b) => a + b, 0) / games).toFixed(1)}, stuck reports ${stuckReports}, ejected impostors ${ejectedImp}, ejected innocents ${ejectedCrew}`);
+console.log(`\noutcomes ${JSON.stringify(outcomes)}, timeouts ${timeouts}, avg length ${finished ? (totalMs / finished / 1000).toFixed(0) : '-'}s, avg sabotages ${(sabotages.reduce((a, b) => a + b, 0) / games).toFixed(1)}, stuck reports ${stuckReports}, ejected impostors ${ejectedImp}, ejected innocents ${ejectedCrew}, emergency meetings ${emergencies}, bot vent dives ${vents}`);

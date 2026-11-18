@@ -255,18 +255,19 @@ export const LobbyView: React.FC<LobbyProps> = ({ onLeave }) => {
       <div ref={mountRef} className="absolute inset-0 w-full h-full" />
 
       {/* TOP HEADER DOCK */}
-      <div className="absolute top-4 left-4 right-4 z-20 flex items-center justify-between pointer-events-none">
+      <div className="absolute top-3 left-3 right-3 sm:top-4 sm:left-4 sm:right-4 z-20 flex items-center justify-between gap-2 pointer-events-none">
         {/* Lobby Code & Share Pills */}
-        <div className="flex items-center space-x-2.5 pointer-events-auto">
-          <div className="flex items-center space-x-3 bg-slate-900/90 backdrop-blur-xl px-4 py-2.5 rounded-2xl border-2 border-slate-700/80 shadow-2xl">
-            <span className="text-[11px] font-black uppercase tracking-wider text-slate-400">ROOM:</span>
-            <span className="text-2xl font-black tracking-widest text-yellow-300 font-mono">
+        <div className="flex items-center gap-1.5 sm:gap-2.5 min-w-0 pointer-events-auto">
+          <div className="flex items-center gap-2 sm:gap-3 bg-slate-900/90 backdrop-blur-xl px-2.5 sm:px-4 py-2 sm:py-2.5 rounded-2xl border-2 border-slate-700/80 shadow-2xl">
+            <span className="hidden sm:inline text-[11px] font-black uppercase tracking-wider text-slate-400">ROOM:</span>
+            <span className="text-lg sm:text-2xl font-black tracking-widest text-yellow-300 font-mono" aria-label={`Room code ${lobby?.code ?? ''}`}>
               {lobby?.code || '-----'}
             </span>
             <button
               onClick={copyCode}
               className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-all cursor-pointer flex items-center space-x-1"
               title="Copy Room Code"
+              aria-label="Copy room code"
             >
               {copiedCode ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
             </button>
@@ -274,8 +275,9 @@ export const LobbyView: React.FC<LobbyProps> = ({ onLeave }) => {
 
           <button
             onClick={copyLink}
-            className="flex items-center space-x-1.5 bg-slate-900/90 backdrop-blur-xl hover:bg-slate-800 px-3.5 py-2.5 rounded-2xl border-2 border-slate-700/80 shadow-xl text-xs font-bold text-cyan-300 hover:text-cyan-200 transition-all cursor-pointer pointer-events-auto"
+            className="flex items-center space-x-1.5 bg-slate-900/90 backdrop-blur-xl hover:bg-slate-800 px-2.5 sm:px-3.5 py-2 sm:py-2.5 rounded-2xl border-2 border-slate-700/80 shadow-xl text-xs font-bold text-cyan-300 hover:text-cyan-200 transition-all cursor-pointer pointer-events-auto"
             title="Copy Invite Link"
+            aria-label="Copy invite link"
           >
             {copiedLink ? <Check className="w-4 h-4 text-emerald-400" /> : <Sparkles className="w-4 h-4" />}
             <span className="hidden sm:inline">INVITE LINK</span>
@@ -283,8 +285,8 @@ export const LobbyView: React.FC<LobbyProps> = ({ onLeave }) => {
         </div>
 
         {/* Players Count & Leave Button */}
-        <div className="flex items-center space-x-2.5 pointer-events-auto">
-          <div className="flex items-center space-x-2 bg-slate-900/90 backdrop-blur-xl px-4 py-2.5 rounded-2xl border-2 border-slate-700/80 shadow-2xl">
+        <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0 pointer-events-auto">
+          <div className="flex items-center space-x-2 bg-slate-900/90 backdrop-blur-xl px-2.5 sm:px-4 py-2 sm:py-2.5 rounded-2xl border-2 border-slate-700/80 shadow-2xl">
             <Users className="w-4 h-4 text-cyan-400" />
             <span className="text-sm font-black text-slate-200">
               {lobby?.players.length || 1}/{MAX_PLAYERS_PER_LOBBY}
@@ -293,8 +295,9 @@ export const LobbyView: React.FC<LobbyProps> = ({ onLeave }) => {
 
           <button
             onClick={handleLeave}
-            className="p-2.5 rounded-2xl bg-red-950/80 hover:bg-red-900 border-2 border-red-700/80 text-red-200 hover:text-white transition-all shadow-xl cursor-pointer"
+            className="p-2 sm:p-2.5 rounded-2xl bg-red-950/80 hover:bg-red-900 border-2 border-red-700/80 text-red-200 hover:text-white transition-all shadow-xl cursor-pointer"
             title="Leave Lobby"
+            aria-label="Leave lobby"
           >
             <LogOut className="w-5 h-5" />
           </button>
